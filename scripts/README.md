@@ -12,6 +12,7 @@
 | `httpx_scraper.py` | 异步 HTTP 爬虫 | httpx |
 | `cloudflare_email_decoder.py` | Cloudflare 邮箱解密 | 无 |
 | `lab_member_scraper.py` | 实验室成员批量爬取 | requests, beautifulsoup4 |
+| **`openreview_scraper.py`** | **OpenReview 会议论文爬取** | **openreview-py, pandas** |
 
 ---
 
@@ -55,6 +56,12 @@ email = decode_cloudflare_email("f493919e85c6c5...")
 # 使用异步爬虫
 from httpx_scraper import batch_scrape
 results = await batch_scrape(urls, max_concurrent=5)
+
+# 使用 OpenReview 会议爬虫
+from openreview_scraper import OpenReviewScraper
+scraper = OpenReviewScraper(username, password)
+results = scraper.scrape_conference('ICML.cc/2025/Conference')
+scraper.save_to_csv('icml2025.csv')
 ```
 
 ---
@@ -74,3 +81,4 @@ results = await batch_scrape(urls, max_concurrent=5)
 - [Python 爬虫技术指南](../references/python-scraping-guide.md)
 - [URL 过滤与优先级规则](../references/url-priority-rules.md)
 - [反爬虫解决方案](../references/anti-scraping-solutions.md)
+- [会议论文爬取指南](../references/conference-paper-scraping.md)

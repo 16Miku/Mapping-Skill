@@ -76,9 +76,10 @@ See reference scripts in `scripts/` directory for implementation templates.
 | `references/chinese-surnames.md` | Chinese surname database |
 | `references/deduplication-rules.md` | Candidate deduplication rules |
 | `references/candidate-classifier.md` | Candidate type classification |
-| **`references/python-scraping-guide.md`** | **Python scraping techniques (NEW)** |
-| **`references/url-priority-rules.md`** | **URL filtering and prioritization (NEW)** |
-| **`references/anti-scraping-solutions.md`** | **Anti-scraping solutions (NEW)** |
+| **`references/python-scraping-guide.md`** | **Python scraping techniques** |
+| **`references/url-priority-rules.md`** | **URL filtering and prioritization** |
+| **`references/anti-scraping-solutions.md`** | **Anti-scraping solutions** |
+| **`references/conference-paper-scraping.md`** | **Conference paper scraping (OpenReview)** |
 
 ## Scripts (Reference Implementations)
 
@@ -88,6 +89,7 @@ See reference scripts in `scripts/` directory for implementation templates.
 | `scripts/httpx_scraper.py` | Async HTTP scraper |
 | `scripts/cloudflare_email_decoder.py` | Cloudflare email decryption |
 | `scripts/lab_member_scraper.py` | Lab member batch scraper |
+| **`scripts/openreview_scraper.py`** | **OpenReview conference scraper** |
 
 ---
 
