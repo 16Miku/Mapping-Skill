@@ -12,7 +12,7 @@
 | `httpx_scraper.py` | 异步 HTTP 爬虫 | httpx |
 | `cloudflare_email_decoder.py` | Cloudflare 邮箱解密 | 无 |
 | `lab_member_scraper.py` | 实验室成员批量爬取 | requests, beautifulsoup4 |
-| **`openreview_scraper.py`** | **OpenReview 会议论文爬取** | **openreview-py, pandas** |
+| **`openreview_scraper.py`** | **OpenReview 会议论文爬取** (含 Profile 缓存、Email 三级回退、ORCID 拼接) | **openreview-py, pandas** |
 
 ---
 

@@ -355,18 +355,33 @@ Format results as a structured table:
 5. Classify and deduplicate
 6. Present results
 
-### Example 3: Conference Speaker Discovery
+### Example 3: Conference Paper Author Discovery (OpenReview API)
 
-**User Request:** "Find Chinese researchers who presented at NeurIPS 2024 on LLM alignment"
+**User Request:** "Find Chinese researchers who published at ICML 2025"
 
-**Execution:**
-1. Search: `NeurIPS 2024 "alignment" authors site:neurips.cc`
-2. Extract author names and affiliations
+**Execution (OpenReview API 方案 — 推荐):**
+1. Login to OpenReview API (`api2.openreview.net`)
+2. Fetch all papers: `client.get_all_notes(content={'venueid': 'ICML.cc/2025/Conference'})`
+3. For each paper, extract authors and author IDs
+4. Identify Chinese authors using surname matching (`references/chinese-surnames.md`)
+5. For Profile IDs (`~Name1`): call `client.get_profile()` to get Email, Homepage, Scholar, DBLP, ORCID, GitHub
+6. For Email IDs (`user@email.com`): use directly as contact email
+7. Apply three-level email fallback: `preferredEmail → emails[0] → 'Hidden'`
+8. Handle Google Scholar field name variants (`gscholar` or `google_scholar`)
+9. Construct ORCID URLs from bare IDs if needed
+10. Save to CSV with `utf-8-sig` encoding
+11. See `references/conference-paper-scraping.md` for complete guide and `scripts/openreview_scraper.py` for code
+
+**Performance benchmark (ICML 2025):**
+- 3,257 papers → 8,221 Chinese author records in ~12 min (4.73 it/s)
+- Homepage: 73%, Google Scholar: 72%
+
+**Execution (Web 搜索方案 — 备选):**
+1. Search: `ICML 2025 "alignment" authors site:openreview.net`
+2. Extract author names and affiliations from search results
 3. For each author, search for their personal page
 4. Scrape profiles and identify Chinese candidates
-5. Standardize to "Alignment" field
-6. Generate personalized emails
-7. Present results
+5. Standardize research field, generate personalized emails
 
 ---
 
