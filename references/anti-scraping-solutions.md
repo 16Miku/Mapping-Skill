@@ -58,6 +58,21 @@ print(email)  # 输出: example@domain.com
 
 **完整参考实现**: `scripts/cloudflare_email_decoder.py`
 
+**实战案例**:
+- **PKU.AI**: 65 名成员中，30+ 个 Cloudflare 加密邮箱成功解密（成功率 ~95%）
+- **清华 THUNLP**: 邮箱格式 `xxx@mails.tsinghua.edu.cn`
+
+**在 Hugo Academic 卡片页中的集成**: 当遍历 `.network-icon a` 链接时，检测 `email-protection` 关键词后直接解密，无需额外请求：
+
+```python
+for link in card.select('.network-icon a'):
+    href = link.get('href', '')
+    if 'email-protection' in href:
+        encoded = href.split('#')[-1]
+        email = decode_cloudflare_email(encoded)
+        continue  # 跳过后续链接分类
+```
+
 #### 成功率
 
 | 方案 | 成功率 | 成本 |
@@ -142,7 +157,8 @@ def extract_email_all_methods(soup, text_content):
 |------|---------|---------|
 | 南大 LAMDA | `lamda.nju.edu.cn` | `[at]` |
 | 清华 | `mails.tsinghua.edu.cn` | Cloudflare XOR |
-| 北大 | `stu.pku.edu.cn` | Cloudflare XOR |
+| 北大 PKU.AI | `stu.pku.edu.cn` | Cloudflare XOR |
+| 北大 PKU.AI (外部) | `gmail.com`, `outlook.com` 等 | Cloudflare XOR |
 | 通用 | `*.edu.cn` | 各种 |
 
 ---

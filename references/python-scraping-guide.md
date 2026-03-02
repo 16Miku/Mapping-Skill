@@ -15,6 +15,7 @@
 | 场景 | 推荐方案 | 优点 | 缺点 | 成本 |
 |------|---------|------|------|------|
 | 简单静态页面 | requests + BeautifulSoup | 快速、轻量、易调试 | 无法处理 JS 渲染 | 免费 |
+| **Hugo Academic 卡片页** | **CSS 选择器 + CF 解密** | **单页提取、模板通用** | **仅限 Hugo 模板** | **免费** |
 | 需要 JS 渲染 | Playwright / Selenium | 功能完整、支持复杂页面 | 较慢、资源消耗大 | 免费 |
 | 高并发爬取 | httpx + asyncio | 异步高效、支持 HTTP/2 | 需要异步编程知识 | 免费 |
 | **社交网络图谱** | **GitHub API** | **结构化数据、三层拼装** | **需要 Token** | **免费** |
@@ -26,6 +27,11 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                    目标网站类型判断                          │
 ├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Hugo Academic 模板 (.people-person 卡片)                    │
+│      │                                                       │
+│      ▼                                                       │
+│  使用 CSS 选择器 + CF 解密 (单页提取) ────> 免费            │
 │                                                              │
 │  学术网站 (.edu, .github.io)                                 │
 │      │                                                       │
@@ -658,9 +664,146 @@ def get_all_following(username, headers):
 
 ---
 
-## 6. 常见问题解决
+## 6. Hugo Academic / Wowchemy 模板卡片解析
 
-### 5.1 编码问题
+### 6.1 概述
+
+**Hugo Academic**（现称 Wowchemy）是学术圈最流行的个人/实验室网站模板。大量顶尖 AI 实验室使用它构建团队页面。该模板有固定的 HTML 结构，掌握其 CSS 选择器可以实现高效的**单页批量提取**。
+
+**实测案例**: PKU.AI — 65 名成员，一次请求提取全部，成功解密 30+ 个 Cloudflare 邮箱。
+
+**核心优势**:
+- 单页提取，无需访问详情页 → 只需 1 次 HTTP 请求
+- 结构固定，CSS 选择器通用性强
+- 社交链接集中在 `.network-icon` 区域，分类方便
+
+### 6.2 模板特征识别
+
+如何判断一个网站使用了 Hugo Academic 模板：
+
+```python
+def is_hugo_academic(soup):
+    """检测页面是否使用 Hugo Academic / Wowchemy 模板"""
+    indicators = [
+        soup.select('.people-person'),          # 人员卡片
+        soup.select('.network-icon'),            # 社交链接图标区
+        soup.select('.portrait-title'),          # 人物标题区
+        soup.select('meta[name="generator"][content*="Hugo"]'),  # Hugo 标记
+        soup.select('link[href*="wowchemy"]'),   # Wowchemy 样式表
+    ]
+    return any(indicators)
+```
+
+**常见 Hugo Academic 实验室网站**:
+
+| 网站 | URL | 特点 |
+|------|-----|------|
+| PKU.AI | `pku.ai/people/` | Cloudflare 邮箱保护 |
+| TongClass | `tongclass.ac.cn/people/` | 标准 Hugo Academic |
+| 部分 .github.io | `xxx.github.io/people/` | 无反爬 |
+
+### 6.3 CSS 选择器层级
+
+```
+页面结构:
+├── .people-person (或 .media.stream-item)    ← 人员卡片容器
+│   ├── .portrait-title
+│   │   ├── h2                                 ← 姓名
+│   │   └── h3                                 ← 职位/头衔
+│   ├── .portrait-subtitle                     ← 机构/学校
+│   └── .network-icon                          ← 社交链接区
+│       ├── a[href*="email-protection"]        ← Cloudflare 加密邮箱
+│       ├── a[href*="github.com"]              ← GitHub
+│       ├── a[href*="scholar.google"]          ← Google Scholar
+│       ├── a[href*="linkedin.com"]            ← LinkedIn
+│       └── a[href*="zhihu.com"]               ← 知乎
+```
+
+### 6.4 完整卡片提取代码
+
+```python
+from bs4 import BeautifulSoup
+
+def parse_hugo_academic_cards(html, base_url):
+    """
+    从 Hugo Academic 页面提取所有人员信息
+
+    实测: PKU.AI 65 人，30+ 邮箱成功解密
+    """
+    soup = BeautifulSoup(html, 'html.parser')
+
+    # 查找卡片 (两种常见选择器)
+    cards = soup.select('.people-person') or soup.select('.media.stream-item')
+    results = []
+
+    for card in cards:
+        person = {}
+
+        # 姓名
+        name_tag = card.select_one('.portrait-title h2') or card.select_one('h2')
+        if name_tag:
+            person['name'] = name_tag.get_text(strip=True)
+
+        # 职位/机构
+        texts = [t.get_text(strip=True)
+                 for t in card.select('.portrait-title h3, .portrait-subtitle')]
+        person['title'] = ' | '.join(texts)
+
+        # 社交链接 (含 Cloudflare 解密)
+        for link in card.select('.network-icon a'):
+            href = link.get('href', '')
+            if not href:
+                continue
+
+            # Cloudflare 加密邮箱
+            if 'email-protection' in href:
+                encoded = href.split('#')[-1]
+                person['email'] = decode_cf_email(encoded)
+                continue
+
+            # 相对路径补全
+            if href.startswith('/'):
+                href = base_url + href
+
+            # 链接分类
+            href_lower = href.lower()
+            if 'mailto:' in href_lower:
+                person['email'] = href.replace('mailto:', '')
+            elif 'github.com' in href_lower:
+                person['github'] = href
+            elif 'scholar.google' in href_lower:
+                person['scholar'] = href
+            elif 'linkedin.com' in href_lower:
+                person['linkedin'] = href
+
+        results.append(person)
+
+    return results
+
+
+def decode_cf_email(encoded):
+    """Cloudflare XOR 邮箱解密"""
+    try:
+        r = int(encoded[:2], 16)
+        return ''.join(chr(int(encoded[i:i+2], 16) ^ r) for i in range(2, len(encoded), 2))
+    except:
+        return ''
+```
+
+### 6.5 关键处理要点
+
+1. **Cloudflare 邮箱必须在 URL 补全之前处理**: `/cdn-cgi/l/email-protection#...` 是相对路径，但不应补全为 `base_url + /cdn-cgi/...`，而应直接解密
+2. **`continue` 跳过后续分类**: 解密邮箱后立即 `continue`，避免进入普通链接分类逻辑
+3. **两组选择器的降级**: `.people-person` (新版) → `.media.stream-item` (旧版)
+4. **排除模板链接**: `wowchemy` / `academic` 关键词过滤，避免把模板仓库链接当成个人 GitHub
+
+**完整参考脚本**: `scripts/lab_member_scraper.py` (使用 `scrape_card_page()` 方法)
+
+---
+
+## 7. 常见问题解决
+
+### 7.1 编码问题
 
 ```python
 # 问题: CSV 文件在 Excel 中打开乱码
@@ -682,7 +825,7 @@ response = requests.get(url)
 response.encoding = 'utf-8'  # 或 response.apparent_encoding
 ```
 
-### 5.2 连接问题
+### 7.2 连接问题
 
 ```python
 # 问题: SSL 连接错误
@@ -699,7 +842,7 @@ session.mount('https://', adapter)
 response = session.get(url, timeout=15)
 ```
 
-### 5.3 请求频率限制
+### 7.3 请求频率限制
 
 ```python
 # 问题: 请求过于频繁被封
@@ -716,7 +859,7 @@ for url in urls:
     time.sleep(delay)
 ```
 
-### 5.4 无效链接过滤
+### 7.4 无效链接过滤
 
 ```python
 # 问题: 页面模板链接干扰 (如 wowchemy)
@@ -734,22 +877,22 @@ def extract_github(soup: BeautifulSoup) -> str:
 
 ---
 
-## 6. 最佳实践总结
+## 8. 最佳实践总结
 
-### 6.1 爬虫礼仪
+### 8.1 爬虫礼仪
 
 1. **添加请求延迟**: 避免对服务器造成压力
 2. **设置 User-Agent**: 模拟正常浏览器访问
 3. **使用 Session**: 复用连接，提高效率
 4. **遵守 robots.txt**: 检查网站是否允许爬取
 
-### 6.2 错误处理
+### 8.2 错误处理
 
 1. **异常捕获**: 单个页面失败不影响整体
 2. **超时设置**: 避免长时间等待
 3. **重试机制**: 对临时错误自动重试
 
-### 6.3 数据处理
+### 8.3 数据处理
 
 1. **正则表达式**: 提取结构化文本
 2. **CSS 选择器**: 精确定位元素

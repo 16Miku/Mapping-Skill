@@ -88,7 +88,7 @@ See reference scripts in `scripts/` directory for implementation templates.
 | `scripts/serper_search.py` | Serper API search template |
 | `scripts/httpx_scraper.py` | Async HTTP scraper |
 | `scripts/cloudflare_email_decoder.py` | Cloudflare email decryption |
-| `scripts/lab_member_scraper.py` | Lab member batch scraper |
+| `scripts/lab_member_scraper.py` | Lab member scraper (two-phase + card mode with CF decrypt) |
 | **`scripts/openreview_scraper.py`** | **OpenReview conference scraper** |
 | **`scripts/github_network_scraper.py`** | **GitHub social network scraper (Following/Followers)** |
 
@@ -414,6 +414,32 @@ Format results as a structured table:
 - Each user ≈ 3 API calls → ~2,778 total calls within limits
 
 **Key insight:** Profile README is a hidden goldmine — many researchers put Scholar, personal homepage, and social links there that aren't in the API profile.
+
+### Example 5: Hugo Academic Card Parsing with Cloudflare Decryption
+
+**User Request:** "Find all members of PKU.AI lab and extract their emails"
+
+**Execution (单页卡片提取 — Hugo Academic 模板):**
+1. Detect Hugo Academic template: look for `.people-person` or `.media.stream-item` CSS classes
+2. Fetch single page: `https://pku.ai/people/` (only 1 HTTP request needed)
+3. For each `.people-person` card:
+   - Extract name from `.portrait-title h2`
+   - Extract role/affiliation from `.portrait-title h3` and `.portrait-subtitle`
+   - Extract social links from `.network-icon a`
+4. For Cloudflare-protected emails in `.network-icon a`:
+   - Detect `/cdn-cgi/l/email-protection#` in href
+   - Extract hex string after `#`, XOR decrypt with first byte as key
+   - `continue` to skip further link classification
+5. For relative URLs (`/path`): prepend base URL (`https://pku.ai` + `/path`)
+6. Classify remaining links: GitHub, Scholar, LinkedIn, Zhihu, Bilibili
+7. See `scripts/lab_member_scraper.py` (`scrape_card_page()`) for implementation
+
+**Performance benchmark (PKU.AI):**
+- 65 members extracted from single page in <1 second
+- 30+ Cloudflare emails successfully decrypted (~95% success rate on encrypted emails)
+- Only 1 HTTP request (vs 66+ for two-phase approach)
+
+**Key insight:** Hugo Academic is the most popular academic website template. Recognizing `.people-person` + `.network-icon` CSS classes lets you extract all data from one page without visiting individual profile pages. Always check for Cloudflare email protection (`email-protection` in href) before converting relative URLs to absolute.
 
 ---
 

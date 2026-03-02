@@ -2,11 +2,16 @@
 实验室成员批量爬取模板
 
 从实验室人员页面批量爬取成员信息，适用于学术实验室网站。
-基于 LAMDA (南大) 和 TongClass (清华-北大) 实战验证。
+基于 LAMDA (南大)、TongClass (清华-北大)、PKU.AI (北大) 实战验证。
 
 实战案例:
-- LAMDA: 108 名博士生，URL 格式 /Name/ (ASP.NET .ashx 页面)
-- TongClass: 154 名成员，URL 格式 /author/Name/ (Hugo Academic)
+- LAMDA: 108 名博士生，URL 格式 /Name/ (ASP.NET .ashx 页面)，两阶段爬取
+- TongClass: 154 名成员，URL 格式 /author/Name/ (Hugo Academic)，两阶段爬取
+- PKU.AI: 65 名成员，单页卡片提取 (.people-person + Cloudflare 解密)
+
+支持两种爬取模式:
+- 两阶段模式: scrape_lab() — 列表页 → 详情页 (适用于 LAMDA 等)
+- 卡片模式: scrape_card_page() — 单页卡片提取 (适用于 Hugo Academic/Wowchemy)
 
 依赖:
     pip install requests beautifulsoup4
@@ -14,8 +19,13 @@
 使用示例:
     from lab_member_scraper import LabMemberScraper
 
+    # 两阶段模式 (LAMDA 等)
     scraper = LabMemberScraper()
     members = scraper.scrape_lab("https://www.lamda.nju.edu.cn/CH.PhD_student.ashx")
+
+    # 卡片模式 (PKU.AI、Hugo Academic 等)
+    scraper = LabMemberScraper(base_url="https://pku.ai")
+    members = scraper.scrape_card_page("https://pku.ai/people/")
 
     for member in members:
         print(f"{member.name}: {member.email}")
@@ -76,6 +86,20 @@ class LabMemberScraper:
     3. .edu.cn 域名常有 SSL 握手失败 → 需要异常捕获
     4. 论文列表通常在 "Publications" 标题下的 ul/ol 中
     """
+
+    # Hugo Academic / Wowchemy 模板的 CSS 选择器
+    # 用于 scrape_card_page() 单页卡片模式
+    CARD_SELECTORS = ['.people-person', '.media.stream-item']
+    NAME_SELECTORS = ['.portrait-title h2', 'h2', 'h3']
+    ROLE_SELECTORS = ['.portrait-title h3', '.portrait-subtitle', 'p']
+    LINK_SELECTORS = ['.network-icon a', '.social-links a', '.links-icon a']
+
+    # 机构关键词 (用于从卡片文本中提取所属机构)
+    INSTITUTION_KEYWORDS = [
+        'PKU', 'Peking University', 'Tsinghua', 'NJU', 'ZJU', 'SJTU',
+        'University', 'Institute', 'School', 'Lab', 'Center',
+        '北京大学', '清华大学', '南京大学', '浙江大学', '上海交通大学',
+    ]
 
     # 列表页中需要排除的 URL 关键词（导航链接噪声）
     EXCLUDE_URL_KEYWORDS = [
@@ -141,6 +165,207 @@ class LabMemberScraper:
 
         print(f"\n成功爬取 {len(members)} 名成员信息")
         return members
+
+    def scrape_card_page(self, page_url: str, max_members: Optional[int] = None) -> List[MemberProfile]:
+        """
+        单页卡片模式：从一个页面中提取所有人员卡片
+
+        适用于 Hugo Academic / Wowchemy 等模板网站，人员信息以卡片形式
+        排列在同一页面，每个卡片包含姓名、职位、社交链接等。
+        不需要访问详情页，一次请求即可提取所有信息。
+
+        实战案例:
+        - PKU.AI: 65 名成员，成功解密 30+ 个 Cloudflare 保护邮箱
+        - Hugo Academic 模板网站: .people-person 卡片 + .network-icon 社交链接
+
+        CSS 选择器层级:
+        ```
+        .people-person (或 .media.stream-item)
+        ├── .portrait-title h2  → 姓名
+        ├── .portrait-title h3  → 职位
+        ├── .portrait-subtitle  → 机构
+        └── .network-icon a     → 社交链接 (含 Cloudflare 加密邮箱)
+        ```
+
+        Args:
+            page_url: 人员列表页 URL
+            max_members: 限制提取数量 (用于调试)
+
+        Returns:
+            成员资料列表
+        """
+        # 自动推断 base_url
+        if not self.base_url:
+            self.base_url = '/'.join(page_url.split('/')[:3])
+
+        print(f"正在爬取卡片页面: {page_url}")
+
+        try:
+            response = self.session.get(page_url, timeout=15)
+            response.encoding = 'utf-8'
+            soup = BeautifulSoup(response.text, 'html.parser')
+        except Exception as e:
+            print(f"页面请求失败: {e}")
+            return []
+
+        # 查找人员卡片 (尝试多个选择器)
+        cards = []
+        for selector in self.CARD_SELECTORS:
+            cards = soup.select(selector)
+            if cards:
+                print(f"使用选择器 '{selector}' 找到 {len(cards)} 个人员卡片")
+                break
+
+        if not cards:
+            print("未找到人员卡片，请检查页面结构")
+            return []
+
+        if max_members:
+            cards = cards[:max_members]
+            print(f"调试模式：只处理前 {max_members} 个")
+
+        # 逐卡片提取
+        members = []
+        email_count = 0
+        for card in cards:
+            profile = self._extract_from_card(card)
+            if profile.name or profile.name_cn:
+                members.append(profile)
+                if profile.email:
+                    email_count += 1
+
+        print(f"\n成功提取 {len(members)} 名成员")
+        print(f"邮箱覆盖: {email_count}/{len(members)} ({email_count*100//max(len(members),1)}%)")
+        return members
+
+    def _extract_from_card(self, card) -> MemberProfile:
+        """
+        从单个人员卡片中提取所有信息
+
+        处理流程:
+        1. 姓名 (.portrait-title h2)
+        2. 职位/机构 (.portrait-title h3, .portrait-subtitle)
+        3. 社交链接 (.network-icon a)，含 Cloudflare 邮箱解密
+
+        特殊处理:
+        - Cloudflare 加密邮箱: 检测 /cdn-cgi/l/email-protection# 链接，
+          提取 # 后的加密字符串，XOR 解密
+        - 相对 URL: 以 / 开头的链接自动补全为绝对 URL
+        """
+        profile = MemberProfile()
+
+        # 1. 姓名提取
+        for selector in self.NAME_SELECTORS:
+            name_tag = card.select_one(selector)
+            if name_tag:
+                full_name = name_tag.get_text(strip=True)
+                if self._is_chinese(full_name):
+                    profile.name_cn = full_name
+                else:
+                    profile.name = full_name
+                # 如果同时有中英文名，尝试拆分
+                if not profile.name and profile.name_cn:
+                    profile.name = profile.name_cn  # 保底
+                break
+
+        # 2. 职位/机构提取
+        role_texts = []
+        for selector in self.ROLE_SELECTORS:
+            elements = card.select(selector)
+            role_texts = [t.get_text(strip=True) for t in elements if t.get_text(strip=True)]
+            if role_texts:
+                break
+
+        if role_texts:
+            profile.role = self._extract_role(' '.join(role_texts))
+            # 机构提取
+            for text in role_texts:
+                if any(kw in text for kw in self.INSTITUTION_KEYWORDS):
+                    profile.affiliation = text
+                    break
+
+        # 3. 社交链接 + 邮箱提取
+        links = []
+        for selector in self.LINK_SELECTORS:
+            links = card.select(selector)
+            if links:
+                break
+
+        for link in links:
+            href = link.get('href', '')
+            if not href:
+                continue
+
+            # Cloudflare 加密邮箱检测 (必须在 URL 补全之前处理)
+            if 'email-protection' in href:
+                encoded_hash = href.split('#')[-1]
+                decoded_email = self._decode_cloudflare_email(encoded_hash)
+                if decoded_email:
+                    profile.email = decoded_email
+                    print(f"  [CF解密] {profile.name or profile.name_cn}: {decoded_email}")
+                continue  # 处理完加密邮箱，跳过后续链接分类
+
+            # 相对 URL → 绝对 URL
+            if href.startswith('/'):
+                href = self.base_url + href
+
+            # 常规链接分类
+            href_lower = href.lower()
+            if 'mailto:' in href_lower:
+                if not profile.email:
+                    profile.email = href.replace('mailto:', '').strip()
+            elif 'github.com' in href_lower and 'wowchemy' not in href_lower:
+                if not profile.github:
+                    profile.github = href
+            elif 'scholar.google' in href_lower:
+                if not profile.google_scholar:
+                    profile.google_scholar = href
+            elif 'linkedin.com' in href_lower:
+                if not profile.linkedin:
+                    profile.linkedin = href
+            elif 'zhihu.com' in href_lower:
+                if not profile.zhihu:
+                    profile.zhihu = href
+            elif 'bilibili.com' in href_lower:
+                if not profile.bilibili:
+                    profile.bilibili = href
+            elif 'twitter.com' in href_lower or 'x.com' in href_lower:
+                if not profile.twitter:
+                    profile.twitter = href
+            else:
+                # 其余链接作为个人主页
+                if not profile.homepage:
+                    profile.homepage = href
+
+        return profile
+
+    @staticmethod
+    def _decode_cloudflare_email(encoded: str) -> str:
+        """
+        内联 Cloudflare XOR 解密
+
+        Cloudflare 邮箱保护: 第一个字节 (2 hex chars) 为密钥，
+        后续每个字节与密钥 XOR 得到原始字符。
+
+        PKU.AI 实测: 65 人中成功解密 30+ 个邮箱 (成功率 ~95% 对加密邮箱)
+
+        Args:
+            encoded: # 后的十六进制字符串
+
+        Returns:
+            解密后的邮箱，失败返回空字符串
+        """
+        try:
+            r = int(encoded[:2], 16)
+            email = ''.join(
+                chr(int(encoded[i:i+2], 16) ^ r)
+                for i in range(2, len(encoded), 2)
+            )
+            if '@' in email and '.' in email:
+                return email
+            return ''
+        except Exception:
+            return ''
 
     def _get_member_entries(self, lab_url: str) -> List[Dict]:
         """
@@ -569,18 +794,26 @@ def save_to_csv(members: List[MemberProfile], filepath: str):
 # ==================== 使用示例 ====================
 
 if __name__ == "__main__":
-    # 示例 1: 爬取 LAMDA 博士生
+    # === 模式 1: 两阶段爬取 (列表页 → 详情页) ===
+    # 适用于: LAMDA、自定义 HTML/ASP.NET 页面
+
+    # 示例: 爬取 LAMDA 博士生
     # scraper = LabMemberScraper(delay=1.0, base_url="https://www.lamda.nju.edu.cn")
     # members = scraper.scrape_lab("https://www.lamda.nju.edu.cn/CH.PhD_student.ashx")
 
-    # 示例 2: 爬取 TongClass 成员
+    # 示例: 爬取 TongClass 成员
     # scraper = LabMemberScraper(delay=0.3, base_url="https://tongclass.ac.cn")
     # members = scraper.scrape_lab("https://tongclass.ac.cn/people/")
 
-    # 示例 3: 通用实验室页面
-    lab_url = "https://example.edu/lab/people/"
-    scraper = LabMemberScraper(delay=0.5)
-    members = scraper.scrape_lab(lab_url, max_members=5)  # 调试模式
+    # === 模式 2: 卡片模式 (单页提取) ===
+    # 适用于: Hugo Academic / Wowchemy 模板网站
+
+    # 示例: 爬取 PKU.AI 成员 (含 Cloudflare 邮箱解密)
+    scraper = LabMemberScraper(base_url="https://pku.ai")
+    members = scraper.scrape_card_page("https://pku.ai/people/", max_members=5)
+
+    # 全量模式:
+    # members = scraper.scrape_card_page("https://pku.ai/people/")
 
     # 打印结果
     print(f"\n=== 共 {len(members)} 名成员 ===")

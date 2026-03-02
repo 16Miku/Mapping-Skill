@@ -11,7 +11,7 @@
 | `serper_search.py` | Serper API 搜索模板 | httpx, python-dotenv |
 | `httpx_scraper.py` | 异步 HTTP 爬虫 | httpx |
 | `cloudflare_email_decoder.py` | Cloudflare 邮箱解密 | 无 |
-| `lab_member_scraper.py` | 实验室成员批量爬取 (含 [at] 邮箱解析) | requests, beautifulsoup4 |
+| `lab_member_scraper.py` | 实验室成员爬取 (两阶段模式 + Hugo Academic 卡片模式，含 [at] 解析和 CF 解密) | requests, beautifulsoup4 |
 | **`openreview_scraper.py`** | **OpenReview 会议论文爬取** (含 Profile 缓存、Email 三级回退、ORCID 拼接) | **openreview-py, pandas** |
 | **`github_network_scraper.py`** | **GitHub 社交网络爬取** (Following/Followers 遍历 + 三层数据拼装) | **requests, pandas, openpyxl** |
 
@@ -69,6 +69,12 @@ from github_network_scraper import GitHubNetworkScraper
 scraper = GitHubNetworkScraper(token="ghp_xxx")
 users = scraper.scrape_following("AmandaXu97")
 scraper.save_to_excel(users, "following.xlsx")
+
+# 使用卡片模式爬取 Hugo Academic 网站 (如 PKU.AI)
+from lab_member_scraper import LabMemberScraper
+scraper = LabMemberScraper(base_url="https://pku.ai")
+members = scraper.scrape_card_page("https://pku.ai/people/")
+# 自动解密 Cloudflare 保护的邮箱
 ```
 
 ---
