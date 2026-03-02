@@ -67,7 +67,130 @@ print(email)  # 输出: example@domain.com
 
 ---
 
-### 2. User-Agent 检测
+### 2. 邮箱文本混淆（中国高校常见）
+
+#### 问题描述
+
+许多中国高校网站（如南大 LAMDA、清华 THUNLP 等）不使用 Cloudflare，而是直接在 HTML 文本中将 `@` 替换为 `[at]` 或 `(at)` 来防止垃圾邮件抓取：
+
+```html
+<!-- 原始邮箱: zhangsx@lamda.nju.edu.cn -->
+<p>Email: zhangsx [at] lamda.nju.edu.cn</p>
+```
+
+#### 解决方案
+
+**正则表达式匹配**（免费，简单有效）：
+
+```python
+import re
+
+def extract_obfuscated_email(text):
+    """
+    提取 [at]/(at) 混淆的邮箱地址
+
+    支持格式:
+    - user [at] domain.edu.cn
+    - user(at)domain.edu.cn
+    - user [at] domain.edu.cn  (含多余空格)
+    """
+    pattern = r'([a-zA-Z0-9._-]+)\s*(?:\[at\]|@|\(at\))\s*([a-zA-Z0-9._-]+\.[a-zA-Z]{2,})'
+    match = re.search(pattern, text, re.IGNORECASE)
+    if match:
+        return f"{match.group(1)}@{match.group(2)}"
+    return ''
+
+# 使用示例
+text = "Email: zhangsx [at] lamda.nju.edu.cn"
+email = extract_obfuscated_email(text)  # zhangsx@lamda.nju.edu.cn
+```
+
+**完整的邮箱提取策略**（优先级从高到低）：
+
+```python
+def extract_email_all_methods(soup, text_content):
+    """综合邮箱提取，覆盖所有常见混淆方式"""
+    # 1. mailto 链接 (最可靠)
+    mailto = soup.select_one('a[href^="mailto:"]')
+    if mailto:
+        return mailto['href'].replace('mailto:', '').strip()
+
+    # 2. Cloudflare 保护 (XOR 解密)
+    cf_link = soup.select_one('a[href*="/cdn-cgi/l/email-protection"]')
+    if cf_link:
+        encoded = cf_link['href'].split('#')[-1]
+        return decode_cloudflare_email(encoded)
+
+    # 3. [at] / (at) 混淆 (中国高校常见)
+    at_pattern = r'([a-zA-Z0-9._-]+)\s*(?:\[at\]|\(at\))\s*([a-zA-Z0-9._-]+\.[a-zA-Z]{2,})'
+    match = re.search(at_pattern, text_content, re.IGNORECASE)
+    if match:
+        return f"{match.group(1)}@{match.group(2)}"
+
+    # 4. 纯文本正则 (最后手段，可能误匹配)
+    email_pattern = r'[\w.-]+@[\w.-]+\.\w+'
+    match = re.search(email_pattern, text_content)
+    if match:
+        return match.group()
+
+    return ''
+```
+
+#### 常见域名
+
+| 高校 | 邮箱域名 | 混淆方式 |
+|------|---------|---------|
+| 南大 LAMDA | `lamda.nju.edu.cn` | `[at]` |
+| 清华 | `mails.tsinghua.edu.cn` | Cloudflare XOR |
+| 北大 | `stu.pku.edu.cn` | Cloudflare XOR |
+| 通用 | `*.edu.cn` | 各种 |
+
+---
+
+### 3. SSL 握手失败（中国 .edu.cn 常见）
+
+#### 问题描述
+
+部分中国高校网站的 SSL 配置不标准，请求时会触发握手失败：
+
+```
+SSLError: [SSL: SSLV3_ALERT_HANDSHAKE_FAILURE] sslv3 alert handshake failure
+```
+
+**典型触发场景**: 爬取成员列表时，URL 中混入了 `http://www.nju.edu.cn` 等校主页链接。
+
+#### 解决方案
+
+```python
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
+
+# 方案 1: 跳过 SSL 验证 (简单粗暴)
+response = requests.get(url, verify=False, timeout=10)
+
+# 方案 2: 捕获异常并跳过 (推荐)
+try:
+    response = requests.get(url, timeout=10)
+except requests.exceptions.SSLError:
+    print(f"SSL 错误，跳过: {url}")
+    # 可选：尝试 http 而非 https
+    if url.startswith('https://'):
+        response = requests.get(url.replace('https://', 'http://'), timeout=10)
+```
+
+**预防措施**: 在爬取前过滤掉已知有 SSL 问题的域名：
+
+```python
+SSL_PROBLEM_DOMAINS = ['www.nju.edu.cn', 'www.tsinghua.edu.cn']  # 根据实际经验积累
+
+def should_skip_url(url):
+    return any(d in url for d in SSL_PROBLEM_DOMAINS)
+```
+
+---
+
+### 4. User-Agent 检测
 
 #### 问题描述
 
@@ -349,6 +472,12 @@ def scrape_with_selenium(url):
 │      │                                                       │
 │      ├─> 邮箱显示 [email protected]                          │
 │      │       └─> 使用 Cloudflare XOR 解密 (免费)             │
+│      │                                                       │
+│      ├─> 邮箱显示 user [at] domain.edu.cn                    │
+│      │       └─> 正则匹配 \[at\]|\(at\) 并替换为 @ (免费)    │
+│      │                                                       │
+│      ├─> SSL: SSLV3_ALERT_HANDSHAKE_FAILURE                  │
+│      │       └─> 跳过该 URL / 尝试 HTTP / verify=False       │
 │      │                                                       │
 │      ├─> HTTP 403 Forbidden                                  │
 │      │       ├─> 检查 User-Agent → 设置浏览器 UA             │

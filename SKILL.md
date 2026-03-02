@@ -343,17 +343,27 @@ Format results as a structured table:
 9. Generate emails using RL template and talk tracks
 10. Present results with emails
 
-### Example 2: Lab-Targeted Search
+### Example 2: Lab-Targeted Search (直接爬取实验室页面)
 
-**User Request:** "Find all PhD students at Stanford AI Lab working on multimodal learning"
+**User Request:** "Find all PhD students at NJU LAMDA lab"
 
-**Execution:**
-1. Generate site-specific queries: `site:ai.stanford.edu "multimodal" PhD`
-2. Search and collect Stanford AI Lab profiles
-3. Scrape and extract
-4. Filter by research field mapping to "Multimodal"
-5. Classify and deduplicate
-6. Present results
+**Execution (两阶段爬取):**
+1. Fetch lab people page: `https://www.lamda.nju.edu.cn/CH.PhD_student.ashx`
+2. Extract member entries from list page (filter by Chinese name length 2-5 chars)
+3. Exclude navigation noise (MainPage, Pub.ashx, etc. via URL keyword filter)
+4. For each member detail page (`/Name/`):
+   - Extract email with multi-method support: `mailto:` → Cloudflare XOR → `[at]` regex → plain regex
+   - Extract English name from URL path as fallback (e.g., `/zhangzn/` → `zhangzn`)
+   - Extract publications from "Publications" header + following `ul/ol`
+   - Handle SSL errors gracefully (skip `www.nju.edu.cn` etc.)
+5. Classify, deduplicate, present results
+6. See `scripts/lab_member_scraper.py` for complete implementation
+
+**Practical tips:**
+- Chinese lab websites often use `.ashx` (ASP.NET) pages
+- Email obfuscation: `[at]` / `(at)` is more common than Cloudflare on Chinese .edu.cn sites
+- SSL handshake failures are common on .edu.cn domains - catch and skip
+- Use `time.sleep(1.0)` for Chinese university websites (more conservative than global sites)
 
 ### Example 3: Conference Paper Author Discovery (OpenReview API)
 
