@@ -1,11 +1,11 @@
 ---
-name: Mapping-Skill
-description: Complete AI talent discovery and outreach workflow using BrightData MCP. This skill should be used when users need to find PhD students, researchers, or engineers in AI/ML fields, extract their profiles, identify Chinese candidates, classify by type, deduplicate, and generate personalized outreach emails.
+name: ai-talent-recruiter
+description: Complete AI talent discovery and outreach workflow using BrightData MCP or Python scraping. This skill should be used when users need to find PhD students, researchers, or engineers in AI/ML fields, extract their profiles, identify Chinese candidates, classify by type, deduplicate, and generate personalized outreach emails.
 ---
 
 # AI Talent Recruiter
 
-A comprehensive skill for AI/ML talent discovery, profiling, and personalized outreach using BrightData MCP tools.
+A comprehensive skill for AI/ML talent discovery, profiling, and personalized outreach.
 
 ## Overview
 
@@ -18,11 +18,26 @@ This skill enables the complete talent recruitment pipeline:
 6. **Standardize**: Map research fields to 22 standardized categories
 7. **Generate**: Create personalized outreach emails using field-specific templates
 
+## Scraping Approach Selection
+
+This skill supports two scraping approaches:
+
+| Approach | Best For | Cost | Success Rate |
+|----------|----------|------|--------------|
+| **BrightData MCP** (Recommended) | LinkedIn, Twitter, high-anti-scraping sites | Paid | High (99%+) |
+| **Python Scraping** | Academic sites (.edu), personal homepages | Free | Medium (70-85%) |
+
+### Selection Guidelines
+
+- **Use Python scraping** for academic websites (.edu, .github.io) - **FREE**
+- **Use BrightData MCP** for LinkedIn and sites requiring login - **PAID**
+- See `references/python-scraping-guide.md` for detailed implementation
+
 ## Prerequisites
 
-This skill requires the BrightData MCP server to be configured in Claude Code.
+### Option A: BrightData MCP (Paid)
 
-### Installing BrightData MCP
+This approach requires the BrightData MCP server to be configured in Claude Code.
 
 1. Get your API token from [BrightData](https://brightdata.com)
 2. Add the MCP server using Claude CLI:
@@ -38,6 +53,16 @@ Replace `<your-api-token>` with your actual BrightData API key.
    - `mcp__brightdata__scrape_as_markdown` - For page scraping
    - `mcp__brightdata__web_data_linkedin_person_profile` - For LinkedIn profiles
 
+### Option B: Python Scraping (Free)
+
+Requires Python dependencies:
+
+```bash
+pip install requests beautifulsoup4 httpx python-dotenv
+```
+
+See reference scripts in `scripts/` directory for implementation templates.
+
 ## Reference Files
 
 | File | Purpose |
@@ -45,12 +70,24 @@ Replace `<your-api-token>` with your actual BrightData API key.
 | `references/search-templates.md` | Search query templates and keywords |
 | `references/profile-schema.md` | Candidate profile data structure |
 | `references/top-ai-labs.md` | List of top AI research labs |
-| `references/field-mappings.md` | 22 standardized research fields (NEW) |
-| `references/talk-tracks.md` | Technical talking points by field (NEW) |
-| `references/email-templates.md` | Personalized email templates (NEW) |
-| `references/chinese-surnames.md` | Chinese surname database (NEW) |
-| `references/deduplication-rules.md` | Candidate deduplication rules (NEW) |
-| `references/candidate-classifier.md` | Candidate type classification (NEW) |
+| `references/field-mappings.md` | 22 standardized research fields |
+| `references/talk-tracks.md` | Technical talking points by field |
+| `references/email-templates.md` | Personalized email templates |
+| `references/chinese-surnames.md` | Chinese surname database |
+| `references/deduplication-rules.md` | Candidate deduplication rules |
+| `references/candidate-classifier.md` | Candidate type classification |
+| **`references/python-scraping-guide.md`** | **Python scraping techniques (NEW)** |
+| **`references/url-priority-rules.md`** | **URL filtering and prioritization (NEW)** |
+| **`references/anti-scraping-solutions.md`** | **Anti-scraping solutions (NEW)** |
+
+## Scripts (Reference Implementations)
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/serper_search.py` | Serper API search template |
+| `scripts/httpx_scraper.py` | Async HTTP scraper |
+| `scripts/cloudflare_email_decoder.py` | Cloudflare email decryption |
+| `scripts/lab_member_scraper.py` | Lab member batch scraper |
 
 ---
 
@@ -74,6 +111,8 @@ Based on the user's research direction, generate 2-4 search queries using templa
 
 ### Step 2: Execute Searches
 
+#### Option A: BrightData MCP (Paid)
+
 Use `mcp__brightdata__search_engine` with parallel execution:
 
 ```
@@ -83,13 +122,29 @@ Parameters:
   query: "<generated_query>"
 ```
 
-**URL Filtering Priority:**
+#### Option B: Python + Serper API (Free)
+
+Use `scripts/serper_search.py` template:
+
+```python
+from serper_search import serper_search
+
+results = await serper_search(
+    query='"reinforcement learning" PhD student site:*.edu',
+    api_key="YOUR_SERPER_API_KEY"
+)
+urls = [item["link"] for item in results.get("organic", [])]
+```
+
+**URL Filtering Priority** (see `references/url-priority-rules.md`):
 1. Personal pages (`*.github.io`, `sites.google.com`)
 2. University domains (see `references/top-ai-labs.md`)
 3. LinkedIn profiles (`linkedin.com/in/`)
 4. Google Scholar profiles
 
 ### Step 3: Scrape Candidate Profiles
+
+#### Option A: BrightData MCP (Paid)
 
 Use `mcp__brightdata__scrape_as_markdown` for general pages:
 ```
@@ -105,7 +160,35 @@ Parameters:
   url: "<linkedin_url>"
 ```
 
+#### Option B: Python Scraping (Free)
+
+Use `scripts/httpx_scraper.py` or `scripts/lab_member_scraper.py`:
+
+```python
+# Simple static pages
+from httpx_scraper import batch_scrape
+
+results = await batch_scrape(urls, max_concurrent=5)
+
+# Lab member pages
+from lab_member_scraper import LabMemberScraper
+scraper = LabMemberScraper()
+members = scraper.scrape_lab("https://ai.stanford.edu/people/")
+```
+
+**Cloudflare Email Decryption** (see `scripts/cloudflare_email_decoder.py`):
+```python
+from cloudflare_email_decoder import decode_cloudflare_email
+email = decode_cloudflare_email("f493919e85c6c5...")
+```
+
 **Scrape in parallel**: Process 2-5 URLs simultaneously for efficiency.
+
+**Anti-scraping solutions**: See `references/anti-scraping-solutions.md` for handling:
+- Cloudflare protection
+- User-Agent detection
+- Rate limiting
+- IP blocking
 
 ### Step 4: Extract Profile Data
 
