@@ -17,7 +17,8 @@
 | 简单静态页面 | requests + BeautifulSoup | 快速、轻量、易调试 | 无法处理 JS 渲染 | 免费 |
 | 需要 JS 渲染 | Playwright / Selenium | 功能完整、支持复杂页面 | 较慢、资源消耗大 | 免费 |
 | 高并发爬取 | httpx + asyncio | 异步高效、支持 HTTP/2 | 需要异步编程知识 | 免费 |
-| 高反爬网站 | BrightData MCP | 成率高、支持 LinkedIn | 付费服务 | 付费 |
+| **社交网络图谱** | **GitHub API** | **结构化数据、三层拼装** | **需要 Token** | **免费** |
+| 高反爬网站 | BrightData MCP | 成功率高、支持 LinkedIn | 付费服务 | 付费 |
 
 ### 推荐策略
 
@@ -30,6 +31,11 @@
 │      │                                                       │
 │      ▼                                                       │
 │  使用 Python (requests/httpx) ──────────────> 免费          │
+│                                                              │
+│  GitHub 用户关系网络                                         │
+│      │                                                       │
+│      ▼                                                       │
+│  使用 GitHub API (Token 必需) ──────────────> 免费          │
 │                                                              │
 │  LinkedIn / Twitter / Facebook                               │
 │      │                                                       │
@@ -558,7 +564,101 @@ async def search_phd_students(
 
 ---
 
-## 5. 常见问题解决
+## 5. GitHub API 社交网络爬取
+
+### 5.1 概述
+
+GitHub API 提供了一种完全不同于 Web 爬虫的人才发现方式 —— **社交网络图谱遍历**：从一个已知研究者出发，通过 Following/Followers 关系发现整个圈子。
+
+**实测案例**: 从 AmandaXu97 的 Following 列表中提取了 926 名用户的完整信息。
+
+**核心优势**:
+- 不需要搜索关键词 —— 通过人际关系发现
+- API 直接返回结构化数据 —— 无需 HTML 解析
+- 三层数据拼装 —— 覆盖率远超单一来源
+
+### 5.2 认证与速率限制
+
+```python
+# GitHub Token (必须!)
+# 无 Token: 60 请求/小时 (几乎无法使用)
+# 有 Token: 5,000 请求/小时
+# 创建: https://github.com/settings/tokens (无需特殊权限)
+
+headers = {
+    "Authorization": f"token {GITHUB_TOKEN}",
+    "Accept": "application/vnd.github.v3+json"
+}
+```
+
+**速率估算**: 每个用户需要 ~3 次 API 调用 → 926 用户 ≈ 2,778 次 → 在 5,000/小时限制内。
+
+### 5.3 三层数据拼装
+
+```python
+# Layer 1: 基础 Profile (GitHub API 直接返回)
+resp = requests.get(f"https://api.github.com/users/{username}", headers=headers)
+profile = resp.json()
+# 字段: name, bio, email, company, location, blog, twitter_username
+
+# Layer 2: Social Accounts API (较新端点，很多人不知道)
+resp = requests.get(f"https://api.github.com/users/{username}/social_accounts", headers=headers)
+# 返回: [{"provider": "linkedin", "url": "https://linkedin.com/in/xxx"}, ...]
+
+# Layer 3: Profile README (同名仓库的 README.md)
+# 很多研究者在此放 Scholar、LinkedIn、个人主页链接
+for branch in ["main", "master"]:
+    url = f"https://raw.githubusercontent.com/{username}/{username}/{branch}/README.md"
+    resp = requests.get(url)
+    if resp.status_code == 200:
+        readme = resp.text
+        break
+```
+
+### 5.4 从 README 文本提取社交链接
+
+```python
+import re
+
+LINK_PATTERNS = {
+    'scholar': re.compile(r'(https?://scholar\.google\.[\w.]+/citations\?user=[\w-]+)'),
+    'linkedin': re.compile(r'(https?://(?:www\.)?linkedin\.com/in/[\w\-%]+)'),
+    'zhihu': re.compile(r'(https?://(?:www\.)?zhihu\.com/people/[\w\-%]+)'),
+    'bilibili': re.compile(r'(https?://space\.bilibili\.com/\d+)'),
+}
+
+def extract_links(text):
+    results = {}
+    for name, pattern in LINK_PATTERNS.items():
+        match = pattern.search(text)
+        if match:
+            results[name] = match.group(1)
+    return results
+```
+
+### 5.5 分页获取关注列表
+
+```python
+def get_all_following(username, headers):
+    """GitHub API 分页: 每页最多 100 条"""
+    users = []
+    page = 1
+    while True:
+        url = f"https://api.github.com/users/{username}/following?per_page=100&page={page}"
+        resp = requests.get(url, headers=headers)
+        data = resp.json()
+        if not data:
+            break
+        users.extend(data)
+        page += 1
+    return users
+```
+
+**完整参考脚本**: `scripts/github_network_scraper.py`
+
+---
+
+## 6. 常见问题解决
 
 ### 5.1 编码问题
 
@@ -665,6 +765,8 @@ def extract_github(soup: BeautifulSoup) -> str:
 - `scripts/httpx_scraper.py` - 异步 HTTP 爬虫
 - `scripts/cloudflare_email_decoder.py` - Cloudflare 邮箱解密
 - `scripts/lab_member_scraper.py` - 实验室成员批量爬取
+- `scripts/openreview_scraper.py` - OpenReview 会议论文爬虫
+- `scripts/github_network_scraper.py` - GitHub 社交网络爬虫
 
 ---
 

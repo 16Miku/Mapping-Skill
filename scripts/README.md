@@ -11,8 +11,9 @@
 | `serper_search.py` | Serper API 搜索模板 | httpx, python-dotenv |
 | `httpx_scraper.py` | 异步 HTTP 爬虫 | httpx |
 | `cloudflare_email_decoder.py` | Cloudflare 邮箱解密 | 无 |
-| `lab_member_scraper.py` | 实验室成员批量爬取 | requests, beautifulsoup4 |
+| `lab_member_scraper.py` | 实验室成员批量爬取 (含 [at] 邮箱解析) | requests, beautifulsoup4 |
 | **`openreview_scraper.py`** | **OpenReview 会议论文爬取** (含 Profile 缓存、Email 三级回退、ORCID 拼接) | **openreview-py, pandas** |
+| **`github_network_scraper.py`** | **GitHub 社交网络爬取** (Following/Followers 遍历 + 三层数据拼装) | **requests, pandas, openpyxl** |
 
 ---
 
@@ -62,6 +63,12 @@ from openreview_scraper import OpenReviewScraper
 scraper = OpenReviewScraper(username, password)
 results = scraper.scrape_conference('ICML.cc/2025/Conference')
 scraper.save_to_csv('icml2025.csv')
+
+# 使用 GitHub 社交网络爬虫
+from github_network_scraper import GitHubNetworkScraper
+scraper = GitHubNetworkScraper(token="ghp_xxx")
+users = scraper.scrape_following("AmandaXu97")
+scraper.save_to_excel(users, "following.xlsx")
 ```
 
 ---

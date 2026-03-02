@@ -90,6 +90,7 @@ See reference scripts in `scripts/` directory for implementation templates.
 | `scripts/cloudflare_email_decoder.py` | Cloudflare email decryption |
 | `scripts/lab_member_scraper.py` | Lab member batch scraper |
 | **`scripts/openreview_scraper.py`** | **OpenReview conference scraper** |
+| **`scripts/github_network_scraper.py`** | **GitHub social network scraper (Following/Followers)** |
 
 ---
 
@@ -392,6 +393,27 @@ Format results as a structured table:
 3. For each author, search for their personal page
 4. Scrape profiles and identify Chinese candidates
 5. Standardize research field, generate personalized emails
+
+### Example 4: GitHub Social Network Discovery
+
+**User Request:** "Find researchers in AmandaXu97's GitHub Following list"
+
+**Execution (GitHub API 三层数据拼装):**
+1. Get Following list via GitHub API: `GET /users/AmandaXu97/following?per_page=100` (paginated)
+2. For each user, assemble profile from three layers:
+   - Layer 1: `GET /users/{login}` → name, bio, email, company, blog, twitter_username
+   - Layer 2: `GET /users/{login}/social_accounts` → dedicated social links
+   - Layer 3: `raw.githubusercontent.com/{login}/{login}/main/README.md` → extract Scholar/LinkedIn/知乎 via regex
+3. Merge all text sources and extract links using regex patterns
+4. Classify candidates, deduplicate, present results
+5. See `scripts/github_network_scraper.py` for complete implementation
+
+**Performance benchmark (AmandaXu97):**
+- 926 following users processed successfully
+- Rate limit: 5,000 requests/hour with Token (vs 60/hour without)
+- Each user ≈ 3 API calls → ~2,778 total calls within limits
+
+**Key insight:** Profile README is a hidden goldmine — many researchers put Scholar, personal homepage, and social links there that aren't in the API profile.
 
 ---
 
