@@ -13,6 +13,7 @@
 | `cloudflare_email_decoder.py` | Cloudflare 邮箱解密 | 无 |
 | `lab_member_scraper.py` | 实验室成员爬取 (三种模式: 两阶段/Hugo Academic 卡片/邮箱反向定位，含 [at] 解析和 CF 解密) | requests, beautifulsoup4 |
 | **`openreview_scraper.py`** | **OpenReview 会议论文爬取** (含 Profile 缓存、Email 三级回退、ORCID 拼接) | **openreview-py, pandas** |
+| **`cvf_paper_scraper.py`** | **CVF 论文爬取** (CVPR/ICCV/WACV, HTML 元数据 + PDF 内存流邮箱提取, 花括号缩写解析) | **requests, beautifulsoup4, PyMuPDF, pandas** |
 | **`github_network_scraper.py`** | **GitHub 社交网络爬取** (Following/Followers 遍历 + 三层数据拼装) | **requests, pandas, openpyxl** |
 
 ---
@@ -69,6 +70,13 @@ from github_network_scraper import GitHubNetworkScraper
 scraper = GitHubNetworkScraper(token="ghp_xxx")
 users = scraper.scrape_following("AmandaXu97")
 scraper.save_to_excel(users, "following.xlsx")
+
+# 使用 CVF 论文爬虫 (CVPR/ICCV/WACV)
+from cvf_paper_scraper import CVFPaperScraper
+scraper = CVFPaperScraper()
+scraper.scrape_conference('CVPR2025', max_papers=10)  # 调试: 10 篇
+scraper.save_to_csv('cvpr2025_test.csv')
+# 全量: scraper.scrape_conference('CVPR2025')
 
 # 使用卡片模式爬取 Hugo Academic 网站 (如 PKU.AI)
 from lab_member_scraper import LabMemberScraper

@@ -1,6 +1,8 @@
 # 会议论文爬取指南
 
-> 本文档记录从学术会议平台（如 OpenReview）爬取论文和作者信息的完整实践经验，基于 ICML 2025 的真实爬取案例。
+> 本文档记录从学术会议平台爬取论文和作者信息的完整实践经验，涵盖两大平台：
+> - **OpenReview** (ICML, NeurIPS, ICLR) — 基于 ICML 2025 实战
+> - **CVF Open Access** (CVPR, ICCV, WACV) — 基于 CVPR 2025 实战
 
 ---
 
@@ -18,9 +20,26 @@
 | 平台 | 会议 | API 支持 | 推荐方案 |
 |------|------|---------|---------|
 | **OpenReview** | ICML, NeurIPS, ICLR, AAAI | ✅ 官方 Python SDK | `openreview-py` |
+| **CVF Open Access** | CVPR, ICCV, WACV | ❌ 纯 HTML 爬虫 | `requests + BS4 + PyMuPDF` |
 | **ACL Anthology** | ACL, EMNLP, NAACL | ⚠️ 需要爬虫 | `requests + BS4` |
-| **IEEE Xplore** | CVPR, ICCV | ⚠️ 需要爬虫 | `requests + BS4` |
 | **ACM DL** | KDD, SIGIR | ⚠️ 需要爬虫 | `requests + BS4` |
+
+### 平台选择决策
+
+```
+收到会议爬取任务
+    │
+    ├── ICML / NeurIPS / ICLR / AAAI
+    │       └── OpenReview API (结构化数据，Profile 链接丰富)
+    │           → 使用 scripts/openreview_scraper.py
+    │
+    ├── CVPR / ICCV / WACV
+    │       └── CVF Open Access (HTML 爬虫 + PDF 邮箱提取)
+    │           → 使用 scripts/cvf_paper_scraper.py
+    │
+    └── ACL / EMNLP / KDD / ...
+            └── 参考 CVF 方案思路，定制 HTML 解析逻辑
+```
 
 ---
 
@@ -407,7 +426,224 @@ df.to_csv(OUTPUT_FILE, encoding='utf-8-sig')  # 带 BOM 头
 
 ## 参考脚本
 
-完整的面向对象代码模板请参见 `scripts/openreview_scraper.py`
+- OpenReview 会议爬虫: `scripts/openreview_scraper.py`
+- CVF 论文爬虫: `scripts/cvf_paper_scraper.py`
+
+---
+
+## CVF Open Access 平台（CVPR / ICCV / WACV）
+
+> 基于 CVPR 2025 全量爬取实战 (2,871 篇论文, 耗时约 85 分钟)
+
+### 1. 平台特点
+
+CVF Open Access (`openaccess.thecvf.com`) 与 OpenReview 的核心区别：
+
+| 维度 | OpenReview | CVF Open Access |
+|------|-----------|-----------------|
+| 数据获取 | Python SDK (API) | HTML 爬虫 (BeautifulSoup) |
+| 作者联系方式 | Profile API 返回 | 需从 PDF 首页提取 |
+| 邮箱来源 | `preferredEmail` 字段 | PDF 文本中的邮箱字符串 |
+| 机构信息 | Profile 中的 `history` | 从邮箱域名推断 |
+| 认证要求 | 需要 OpenReview 账号 | 无需登录，完全公开 |
+| 速度 | 快 (~0.2s/篇，API 调用) | 慢 (~1.8s/篇，需下载 PDF) |
+
+### 2. 环境配置
+
+```bash
+pip install requests beautifulsoup4 PyMuPDF pandas tqdm
+```
+
+**⚠️ PyMuPDF 包名冲突陷阱**:
+
+PyPI 上有一个废弃的山寨包 `fitz` (版本 `0.0.1dev2`)。如果误装会报错:
+```
+ModuleNotFoundError: No module named 'tools'
+```
+
+修复方法:
+```bash
+pip uninstall -y fitz PyMuPDF && pip install PyMuPDF
+```
+
+> 在 Google Colab 中需要额外步骤: 卸载后**必须重启运行时** (Runtime → Restart session)，
+> 因为 Python 已将错误的包加载进内存。
+
+### 3. 常用会议 URL 路径
+
+```python
+CONFERENCE_PATHS = {
+    # CVPR
+    'CVPR2025': '/CVPR2025?day=all',
+    'CVPR2024': '/CVPR2024?day=all',
+    'CVPR2023': '/CVPR2023?day=all',
+    # ICCV
+    'ICCV2023': '/ICCV2023?day=all',
+    'ICCV2021': '/ICCV2021?day=all',
+    # WACV
+    'WACV2025': '/WACV2025',
+    'WACV2024': '/WACV2024',
+}
+```
+
+> **URL 格式规律**: `https://openaccess.thecvf.com/{会议名}{年份}?day=all`，可推断其他年份。
+
+### 4. 第一阶段: HTML 元数据提取
+
+CVF 网页是纯静态 HTML，结构固定:
+
+```html
+<dt class="ptitle"><a href="/content...">论文标题</a></dt>
+<dd><a>作者1</a>, <a>作者2</a>, <a>作者3</a></dd>
+<dd><a href="/content.../paper.pdf">pdf</a></dd>
+```
+
+**核心技巧: BeautifulSoup 兄弟节点漫游法**
+
+```python
+from bs4 import BeautifulSoup
+
+soup = BeautifulSoup(response.text, 'html.parser')
+paper_nodes = soup.find_all('dt', class_='ptitle')
+
+for dt in paper_nodes:
+    title = dt.text.strip()
+
+    # 核心: find_next_sibling() 定位兄弟 <dd> 节点
+    author_dd = dt.find_next_sibling('dd')
+    authors = [a.text.strip() for a in author_dd.find_all('a') if a.text.strip()]
+
+    pdf_dd = author_dd.find_next_sibling('dd')
+    pdf_a = pdf_dd.find('a', string='pdf')
+    pdf_link = BASE_URL + pdf_a['href']
+```
+
+> **工程经验**: 不要用正则匹配 HTML! 使用 DOM 树的父子/兄弟关系进行相对定位最稳妥。
+
+### 5. 第二阶段: PDF 内存流解析
+
+从 PDF 首页提取邮箱和机构信息。
+
+**性能优化: 内存流处理 (io.BytesIO)**
+
+传统做法是下载 PDF 到磁盘再读取，但爬取 2,871 篇论文会产生数千次磁盘 I/O。
+使用内存流，PDF 数据从网络直接进入内存，由 PyMuPDF 解析，全程无磁盘写入。
+
+```python
+import io
+import fitz  # PyMuPDF
+
+response = requests.get(pdf_url, timeout=20)
+pdf_stream = io.BytesIO(response.content)    # 内存流
+doc = fitz.open(stream=pdf_stream, filetype="pdf")
+
+# 提取第一页文本，去换行防止邮箱被截断
+first_page_text = doc[0].get_text("text").replace('\n', ' ')
+doc.close()
+```
+
+> **关键细节**: `replace('\n', ' ')` 必须做! PDF 是视觉排版格式，长邮箱会被强行断行。
+
+**MuPDF 非致命警告**:
+```
+MuPDF error: unsupported error: cannot create appearance stream for Screen annotations
+```
+这是 PDF 中嵌入多媒体标注的警告，不影响文本提取，可以安全忽略。
+
+### 6. 邮箱提取双策略 (核心技术突破)
+
+CS 论文中的邮箱格式远比想象中复杂:
+
+| 难度 | 格式示例 | 说明 |
+|------|---------|------|
+| Lv1 | `zhangsan@wayne.edu` | 标准格式，普通正则即可 |
+| Lv2 | `{zhangsan, lisi}@wayne.edu` | 基础花括号缩写 |
+| Lv3 | `{bguler@ece., amitrc@ece.}ucr.edu` | `@` 符号在括号内，域名被切断 |
+
+**策略 1: 标准邮箱正则**
+```python
+import re
+EMAIL_REGEX_STD = r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+'
+std_emails = re.findall(EMAIL_REGEX_STD, text)
+```
+
+**策略 2: 花括号缩写邮箱解析引擎**
+
+```python
+# 匹配 {内容}@?域名后缀
+EMAIL_REGEX_BRACKET = r'\{([^}]+)\}\s*@?\s*([a-zA-Z0-9.-]*\.[a-zA-Z]{2,})'
+
+bracket_matches = re.findall(EMAIL_REGEX_BRACKET, text)
+
+for inside_text, domain_suffix in bracket_matches:
+    users = inside_text.split(',')
+    for user in users:
+        # 清洗 LaTeX 角标符号 (*, †, ‡)
+        user = re.sub(r'[^a-zA-Z0-9_.@+-]', '', user)
+        clean_suffix = re.sub(r'[^a-zA-Z0-9_.@+-]', '', domain_suffix)
+
+        # 智能拼接: 检测 @ 在哪一侧
+        if '@' in user:
+            email = user + clean_suffix       # bguler@ece. + ucr.edu
+        else:
+            email = user + '@' + clean_suffix  # zhangsan + @ + wayne.edu
+
+        # 修复双点: user@.edu → user@edu
+        email = email.replace('@.', '@')
+
+        # 最终验证
+        if re.match(r'^[^@]+@[^@]+\.[^@]+$', email):
+            final_emails.append(email.lower())
+```
+
+**花括号正则详解**:
+- `\{([^}]+)\}` — 捕获 `{}` 里的全部内容 (Group 1: 前缀)
+- `\s*@?\s*` — 容错: `{}` 和域名之间可能有 `@`、空格，也可能没有
+- `([a-zA-Z0-9.-]*\.[a-zA-Z]{2,})` — 捕获域名后缀 (Group 2)
+
+### 7. 机构推断
+
+从邮箱域名中提取学术机构:
+
+```python
+def infer_institutions(emails):
+    institutions = set()
+    for email in emails:
+        domain = email.split('@')[-1]
+        if '.edu' in domain or '.ac' in domain:
+            institutions.add(domain)
+    return list(institutions)
+```
+
+### 8. 防御性编程
+
+爬取近 3,000 篇论文耗时约 85 分钟，必须确保不会因单个错误而中断:
+
+1. **请求超时**: `requests.get(..., timeout=20)`
+2. **状态码检查**: `response.raise_for_status()` 拦截 404 等错误
+3. **try-except 护航**: 每篇论文的解析都在 `try-except` 中，失败只记录状态，不中断循环
+4. **礼貌爬虫**: `time.sleep(1)` — 每秒最多一个 PDF 请求，避免被封
+
+### 9. 实测性能基准 (CVPR 2025)
+
+```
+平台: Google Colab (免费版)
+论文总数: 2,871 篇
+处理速度: ~1.78 s/篇 (主要耗时在 PDF 下载)
+总耗时: 约 85 分钟
+MuPDF 非致命警告: 多处 (Screen annotations, cmsOpenProfileFromMem) — 不影响结果
+最终输出: CSV (标题, 作者, 论文链接, PDF链接, 邮箱, 机构)
+```
+
+### 10. 与 OpenReview 方案的互补
+
+| 场景 | 推荐方案 | 原因 |
+|------|---------|------|
+| ICML / NeurIPS / ICLR | OpenReview API | 结构化数据，Profile 链接丰富 (Homepage 73%, Scholar 72%) |
+| CVPR / ICCV / WACV | CVF HTML + PDF | 无 API，但 PDF 中邮箱和机构更直接 |
+| 需要 Homepage/Scholar/GitHub | OpenReview API | Profile 字段直接返回 |
+| 需要精确邮箱 | CVF PDF 提取 | 论文首页的邮箱比 OpenReview `preferredEmail` 更可能是真实使用的 |
+| 两个平台都有的会议 | 两者结合 | OpenReview 提供 Profile 链接，CVF 提供 PDF 邮箱，互相补充 |
 
 ---
 

@@ -79,7 +79,7 @@ See reference scripts in `scripts/` directory for implementation templates.
 | **`references/python-scraping-guide.md`** | **Python scraping techniques** |
 | **`references/url-priority-rules.md`** | **URL filtering and prioritization** |
 | **`references/anti-scraping-solutions.md`** | **Anti-scraping solutions** |
-| **`references/conference-paper-scraping.md`** | **Conference paper scraping (OpenReview)** |
+| **`references/conference-paper-scraping.md`** | **Conference paper scraping (OpenReview + CVF)** |
 
 ## Scripts (Reference Implementations)
 
@@ -89,8 +89,9 @@ See reference scripts in `scripts/` directory for implementation templates.
 | `scripts/httpx_scraper.py` | Async HTTP scraper |
 | `scripts/cloudflare_email_decoder.py` | Cloudflare email decryption |
 | `scripts/lab_member_scraper.py` | Lab member scraper (two-phase + card mode with CF decrypt) |
-| **`scripts/openreview_scraper.py`** | **OpenReview conference scraper** |
-| **`scripts/github_network_scraper.py`** | **GitHub social network scraper (Following/Followers)** |
+| `scripts/openreview_scraper.py` | OpenReview conference scraper |
+| **`scripts/cvf_paper_scraper.py`** | **CVF paper scraper (CVPR/ICCV/WACV, HTML+PDF email extraction)** |
+| `scripts/github_network_scraper.py` | GitHub social network scraper (Following/Followers) |
 
 ---
 
@@ -500,6 +501,37 @@ Format results as a structured table:
 - Only 1 HTTP request (vs 66+ for two-phase approach)
 
 **Key insight:** Hugo Academic is the most popular academic website template. Recognizing `.people-person` + `.network-icon` CSS classes lets you extract all data from one page without visiting individual profile pages. Always check for Cloudflare email protection (`email-protection` in href) before converting relative URLs to absolute.
+
+### Example 7: CVF Paper Scraping with PDF Email Extraction
+
+**User Request:** "Scrape all CVPR 2025 papers and extract author emails from PDFs"
+
+**Execution (CVF HTML 爬虫 + PDF 邮箱提取):**
+1. Fetch CVF listing page: `https://openaccess.thecvf.com/CVPR2025?day=all`
+2. Parse HTML using sibling traversal: `dt.ptitle` → `find_next_sibling('dd')` for authors → next `dd` for PDF link
+3. For each paper PDF:
+   - Download to memory stream (`io.BytesIO`, no disk I/O)
+   - Extract first page text via PyMuPDF (`fitz`): `doc[0].get_text("text").replace('\n', ' ')`
+   - Apply dual email extraction strategy:
+     - Strategy 1: Standard regex `[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+`
+     - Strategy 2: Bracket notation parser for LaTeX-style `{user1@sub., user2}domain.edu`
+   - Infer institutions from email domains (`.edu` / `.ac`)
+4. Save to CSV with `utf-8-sig` encoding
+5. See `scripts/cvf_paper_scraper.py` for complete implementation
+
+**Performance benchmark (CVPR 2025):**
+- 2,871 papers processed in ~85 minutes (1.78 s/paper, bottleneck is PDF download)
+- MuPDF non-fatal warnings (Screen annotations) safely ignored
+- Bracket email parsing successfully handles `{bguler@ece., amitrc@ece.}ucr.edu` → 2 valid emails
+
+**Key insight:** CVF Open Access is distinct from OpenReview — no API, no Profile system. Author contact info must be extracted from PDF first pages. The bracket email pattern `{users}@?domain` is extremely common in CS papers (LaTeX authblk package). Always `replace('\n', ' ')` on PDF text before regex matching, as PDFs break lines at visual boundaries, not logical ones.
+
+**When to use CVF vs OpenReview:**
+- OpenReview (ICML/NeurIPS/ICLR): API returns structured Profile with Homepage, Scholar, GitHub links
+- CVF (CVPR/ICCV/WACV): No API, but PDF emails are often more accurate than OpenReview's `preferredEmail`
+- For maximum coverage: use both platforms and merge results
+
+**Environment pitfall:** `pip install fitz` installs a WRONG abandoned package. Always use `pip install PyMuPDF`. In Colab, must restart runtime after fixing.
 
 ---
 

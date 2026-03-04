@@ -16,6 +16,7 @@
 |------|---------|------|------|------|
 | 简单静态页面 | requests + BeautifulSoup | 快速、轻量、易调试 | 无法处理 JS 渲染 | 免费 |
 | **Hugo Academic 卡片页** | **CSS 选择器 + CF 解密** | **单页提取、模板通用** | **仅限 Hugo 模板** | **免费** |
+| **PDF 文本解析** | **PyMuPDF (fitz)** | **直接提取 PDF 内容、处理花括号邮箱** | **需注意包名冲突** | **免费** |
 | 需要 JS 渲染 | Playwright / Selenium | 功能完整、支持复杂页面 | 较慢、资源消耗大 | 免费 |
 | 高并发爬取 | httpx + asyncio | 异步高效、支持 HTTP/2 | 需要异步编程知识 | 免费 |
 | **社交网络图谱** | **GitHub API** | **结构化数据、三层拼装** | **需要 Token** | **免费** |
@@ -53,6 +54,11 @@
 │      ├─> 仅邮箱加密 → 使用 XOR 解密 ─────────> 免费          │
 │      │                                                       │
 │      └─> 完整页面保护 → 使用 BrightData ────> 付费          │
+│                                                              │
+│  会议论文 PDF (CVPR/ICCV/WACV)                               │
+│      │                                                       │
+│      ▼                                                       │
+│  使用 PyMuPDF 内存流 + 双策略邮箱提取 ────────> 免费          │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -1013,7 +1019,100 @@ def choose_scraping_method(soup):
 
 ---
 
-## 8. 常见问题解决
+## 8. PDF 文本解析与邮箱提取 (PyMuPDF)
+
+### 8.1 概述
+
+从学术论文 PDF 中提取作者联系方式是 CVF 会议 (CVPR, ICCV, WACV) 爬虫的核心能力。与 OpenReview 的结构化 API 不同，CVF 论文的邮箱信息只存在于 PDF 首页。
+
+**实测案例**: CVPR 2025 — 2,871 篇论文，约 85 分钟完成全量 PDF 解析。
+
+**核心优势**:
+- 从论文首页直接提取邮箱，比 OpenReview `preferredEmail` 更可能是真实使用的地址
+- 内存流处理 (`io.BytesIO`)，无需落盘，避免数千次磁盘 I/O
+- 双策略邮箱提取，覆盖标准格式和 LaTeX 花括号缩写格式
+
+### 8.2 环境配置与包名陷阱
+
+```bash
+pip install PyMuPDF
+```
+
+**⚠️ 经典天坑**: PyPI 上有一个废弃的山寨包叫 `fitz` (版本 `0.0.1dev2`)。
+**绝对不要** `pip install fitz`！
+如果误装了:
+```bash
+pip uninstall -y fitz PyMuPDF && pip install PyMuPDF
+```
+
+> 在 Colab 中还需要**重启运行时** (Runtime → Restart session)，因为 Python 已将错误的包加载进内存。
+
+### 8.3 内存流 PDF 解析
+
+```python
+import io
+import fitz  # 导入名是 fitz，但安装包是 PyMuPDF
+
+response = requests.get(pdf_url, timeout=20)
+
+# 关键: 使用 io.BytesIO 内存流，不落盘
+pdf_stream = io.BytesIO(response.content)
+doc = fitz.open(stream=pdf_stream, filetype="pdf")
+
+# 提取第一页文本
+# replace('\n', ' ') 极其重要! PDF 是视觉排版，邮箱可能被断行
+first_page_text = doc[0].get_text("text").replace('\n', ' ')
+doc.close()
+```
+
+**MuPDF 非致命警告**:
+```
+MuPDF error: cannot create appearance stream for Screen annotations
+```
+这是 PDF 中嵌入多媒体标注的无害警告，不影响文本提取。
+
+### 8.4 花括号缩写邮箱解析
+
+CS 论文中常见的 LaTeX `authblk` 排版宏包会将多个作者邮箱缩写为花括号格式:
+
+| 格式 | 示例 | 难度 |
+|------|------|------|
+| 标准 | `user@domain.edu` | 简单正则 |
+| 基础缩写 | `{user1, user2}@domain.edu` | 花括号 + 拆分 |
+| 变态缩写 | `{bguler@ece., amitrc@ece.}ucr.edu` | `@` 在括号内，域名被切断 |
+
+```python
+import re
+
+# 花括号正则
+EMAIL_REGEX_BRACKET = re.compile(
+    r'\{([^}]+)\}\s*@?\s*([a-zA-Z0-9.-]*\.[a-zA-Z]{2,})'
+)
+
+bracket_matches = EMAIL_REGEX_BRACKET.findall(text)
+
+for inside_text, domain_suffix in bracket_matches:
+    users = inside_text.split(',')
+    for user in users:
+        # 清洗 LaTeX 角标符号 (*, †, ‡, 空格)
+        user = re.sub(r'[^a-zA-Z0-9_.@+-]', '', user)
+        clean_suffix = re.sub(r'[^a-zA-Z0-9_.@+-]', '', domain_suffix)
+
+        # 智能拼接: 检测 @ 在哪一侧
+        if '@' in user:
+            email = user + clean_suffix       # bguler@ece. + ucr.edu
+        else:
+            email = user + '@' + clean_suffix  # user + @ + domain.edu
+
+        # 修复: user@.edu → user@edu
+        email = email.replace('@.', '@')
+```
+
+**完整参考脚本**: `scripts/cvf_paper_scraper.py`
+
+---
+
+## 9. 常见问题解决
 
 ### 8.1 编码问题
 
@@ -1121,6 +1220,7 @@ def extract_github(soup: BeautifulSoup) -> str:
 - `scripts/cloudflare_email_decoder.py` - Cloudflare 邮箱解密
 - `scripts/lab_member_scraper.py` - 实验室成员批量爬取
 - `scripts/openreview_scraper.py` - OpenReview 会议论文爬虫
+- `scripts/cvf_paper_scraper.py` - CVF 论文爬虫 (PDF 邮箱提取)
 - `scripts/github_network_scraper.py` - GitHub 社交网络爬虫
 
 ---

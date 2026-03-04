@@ -163,7 +163,111 @@ def extract_email_all_methods(soup, text_content):
 
 ---
 
-### 3. SSL 握手失败（中国 .edu.cn 常见）
+### 3. PDF 花括号缩写邮箱（CS 论文 LaTeX 排版）
+
+#### 问题描述
+
+CS 领域论文（特别是 CVPR, ICCV 等 CVF 会议）使用 LaTeX `authblk` 宏包排版时，会将多个作者邮箱缩写为花括号格式。这不是反爬虫，而是 PDF 文本提取时遇到的数据格式挑战：
+
+```
+# 基础缩写
+{zhangsan, lisi}@wayne.edu
+
+# 变态缩写 (@ 符号在括号内，域名被切断)
+{bguler@ece., amitrc@ece.}ucr.edu
+```
+
+#### 解决方案
+
+**花括号正则 + 智能拼接引擎**（免费）：
+
+```python
+import re
+
+# 匹配花括号结构: {内容}@?域名
+EMAIL_REGEX_BRACKET = re.compile(
+    r'\{([^}]+)\}\s*@?\s*([a-zA-Z0-9.-]*\.[a-zA-Z]{2,})'
+)
+
+def parse_bracket_emails(text):
+    """解析花括号缩写邮箱"""
+    results = []
+    for inside_text, domain_suffix in EMAIL_REGEX_BRACKET.findall(text):
+        users = inside_text.split(',')
+        for user in users:
+            # 清洗 LaTeX 角标符号 (*, †, ‡)
+            user = re.sub(r'[^a-zA-Z0-9_.@+-]', '', user)
+            suffix = re.sub(r'[^a-zA-Z0-9_.@+-]', '', domain_suffix)
+
+            if not user:
+                continue
+
+            # 智能拼接: 检测 @ 在哪一侧
+            if '@' in user:
+                email = user + suffix       # bguler@ece. + ucr.edu
+            else:
+                email = user + '@' + suffix  # user + @ + domain.edu
+
+            email = email.replace('@.', '@')  # 修复双点
+
+            if re.match(r'^[^@]+@[^@]+\.[^@]+$', email):
+                results.append(email.lower())
+    return results
+```
+
+**完整参考实现**: `scripts/cvf_paper_scraper.py` (`extract_emails_from_text()`)
+
+**实战案例**:
+- **CVPR 2025**: 2,871 篇论文全量爬取，成功解析包含花括号的邮箱格式
+
+#### 成功率
+
+| 方案 | 成功率 | 成本 |
+|------|--------|------|
+| 标准正则 (仅 Lv1) | 70% | 免费 |
+| 标准正则 + 花括号解析 (Lv1-3) | 95%+ | 免费 |
+
+---
+
+### 4. PyMuPDF 包名冲突（Python 环境陷阱）
+
+#### 问题描述
+
+在 Python 中处理 PDF 时需要导入 `fitz`（PyMuPDF 的导入名），但 PyPI 上有一个废弃的同名山寨包 `fitz` (版本 `0.0.1dev2`)。如果误装了山寨包：
+
+```
+import fitz
+# → ModuleNotFoundError: No module named 'tools'
+```
+
+#### 解决方案
+
+```bash
+# 1. 卸载山寨包和残留
+pip uninstall -y fitz PyMuPDF
+
+# 2. 安装正版 PyMuPDF
+pip install PyMuPDF
+```
+
+> **Colab 特别注意**: 卸载后必须**重启运行时** (Runtime → Restart session)，
+> 因为 Python 已将错误的包加载进内存，仅 pip uninstall 无法清除。
+
+#### 预防措施
+
+```python
+# 在代码中添加明确的导入检查
+try:
+    import fitz
+    # 检查是否为真正的 PyMuPDF (版本号应 >= 1.x)
+    assert hasattr(fitz, 'open'), "安装了错误的 fitz 包，请运行: pip install PyMuPDF"
+except ImportError:
+    raise ImportError("请安装 PyMuPDF: pip install PyMuPDF (不是 pip install fitz!)")
+```
+
+---
+
+### 5. SSL 握手失败（中国 .edu.cn 常见）
 
 #### 问题描述
 
@@ -606,6 +710,12 @@ def extract_from_container(card_tag):
 │      │                                                       │
 │      ├─> 邮箱显示 user [at] domain.edu.cn                    │
 │      │       └─> 正则匹配 \[at\]|\(at\) 并替换为 @ (免费)    │
+│      │                                                       │
+│      ├─> PDF 中花括号邮箱 {user@sub.}domain.edu              │
+│      │       └─> 花括号正则 + 智能拼接引擎 (免费)             │
+│      │                                                       │
+│      ├─> import fitz 报错 "No module named 'tools'"          │
+│      │       └─> pip uninstall fitz && pip install PyMuPDF    │
 │      │                                                       │
 │      ├─> SSL: SSLV3_ALERT_HANDSHAKE_FAILURE                  │
 │      │       └─> 跳过该 URL / 尝试 HTTP / verify=False       │
