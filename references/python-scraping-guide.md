@@ -805,6 +805,125 @@ def decode_cf_email(encoded):
 
 **完整参考脚本**: `scripts/lab_member_scraper.py` (使用 `scrape_card_page()` 方法)
 
+### 6.6 两阶段 Hugo Academic 变体 (列表页 → 个人页)
+
+当 Hugo Academic 网站的卡片页只展示姓名和照片（无邮箱、无研究兴趣等详细信息）时，需要**两阶段爬取**：先从列表页提取成员 URL，再逐个访问个人页面。
+
+**实测案例**: 清华-北大 TongClass — 154 名成员，94% 邮箱提取率。
+
+**与卡片模式 (6.4) 的区别**:
+
+| 维度 | 卡片模式 (PKU.AI) | 两阶段 Hugo Academic (TongClass) |
+|------|-------------------|--------------------------------|
+| HTTP 请求 | 1 次 | N+1 次 (1 列表 + N 详情) |
+| 信息完整度 | 仅姓名/邮箱/社交链接 | 完整 (兴趣/教育/研究方向) |
+| 速度 | 极快 (<1s) | 较慢 (约 0.2s × N) |
+| 适用场景 | 卡片中已包含所有信息 | 卡片只有姓名，详情在个人页 |
+
+#### 第一阶段: 列表页解析 (含分组标题)
+
+TongClass 列表页的特殊结构: `h2` 年级标题和 `a[href*="/author/"]` 成员链接交替出现。
+
+```python
+def get_member_urls(list_url, base_url):
+    """
+    从 Hugo Academic 列表页提取成员 URL 和分组信息
+
+    关键: h2 标题和 a 链接交替出现，用状态机记录当前年级
+    """
+    response = requests.get(list_url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+
+    members = []
+    current_grade = ''
+    seen_urls = set()
+
+    for element in soup.find_all(['h2', 'a']):
+        if element.name == 'h2':
+            # 检测年级/分组标题 (如 "清华 23 级", "吉祥物")
+            text = element.get_text(strip=True)
+            if '级' in text or '吉祥物' in text:
+                current_grade = text
+        elif element.name == 'a':
+            href = element.get('href', '')
+            if '/author/' in href:
+                name = element.get_text(strip=True)
+                full_url = base_url + href if href.startswith('/') else href
+                if name and name != 'Avatar' and full_url not in seen_urls:
+                    seen_urls.add(full_url)
+                    members.append({
+                        'url': full_url,
+                        'name': name,
+                        'grade': current_grade
+                    })
+
+    return members
+```
+
+#### 第二阶段: 个人页面结构化提取
+
+Hugo Academic 个人页面有固定的文本段落结构，可用正则提取:
+
+```python
+def extract_from_profile_page(html):
+    """从 Hugo Academic 个人页面提取结构化信息"""
+    soup = BeautifulSoup(html, 'html.parser')
+    text = soup.get_text()
+
+    # --- 研究兴趣 (Interests 和 Education 之间) ---
+    interests_match = re.search(
+        r'Interests\s*\n([\s\S]*?)(?=Education|$)', text
+    )
+    if interests_match:
+        raw = interests_match.group(1).strip()
+        interests = ', '.join([
+            s.strip() for s in raw.split('\n')
+            if s.strip() and s.strip() not in ['•', '*']
+        ])
+
+    # --- 教育背景 (Education 到页脚) ---
+    edu_match = re.search(
+        r'Education\s*\n([\s\S]*?)(?=©|$)', text
+    )
+    if edu_match:
+        raw = edu_match.group(1).strip()
+        education = ' | '.join([
+            s.strip() for s in raw.split('\n')
+            if s.strip() and '©' not in s and 'Published' not in s
+        ])
+
+    # --- 大学检测 (通过 .edu 域名链接) ---
+    uni_link = soup.find('a', href=re.compile(r'tsinghua\.edu|pku\.edu'))
+    university = uni_link.get_text(strip=True) if uni_link else ''
+
+    # --- 邮箱 + 社交链接 (含 Cloudflare 解密) ---
+    # 复用 6.4 的链接提取逻辑
+    ...
+```
+
+#### 关键处理要点
+
+1. **URL 编码 "无" 占位符过滤**:
+   ```python
+   # 部分成员填写 "无" 作为社交链接
+   # URL 编码后为 %e6%97%a0，需要过滤
+   if '%e6%97%a0' not in href:
+       profile['twitter'] = href
+   ```
+
+2. **去重 (Avatar 图片链接)**:
+   ```python
+   # Hugo Academic 列表页中每个人有两个 <a> 指向同一 URL
+   # 一个是头像 (文本为 "Avatar")，一个是姓名
+   if name and name != 'Avatar' and full_url not in seen_urls:
+       ...
+   ```
+
+3. **段落终止符选择**:
+   - `Interests` 段落终止于 `Education`
+   - `Education` 段落终止于 `©` (Hugo 页脚版权符号)
+   - 使用 `(?=...|$)` 确保即使没有终止符也能匹配到文件末尾
+
 ---
 
 ## 7. 邮箱反向定位法 (防御性爬虫策略)

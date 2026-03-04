@@ -472,7 +472,8 @@ Format results as a structured table:
 **Key insight:** Email anchor reverse lookup is a defensive scraping strategy for when all else fails. It doesn't rely on CSS classes or page structure — only on the universal presence of email addresses on academic websites. The DOM traversal heuristic (20-3000 char text length) effectively filters out empty tags and full-page containers.
 
 **When to use each method:**
-- Hugo Academic template detected → `scrape_card_page()` (Example 5)
+- Hugo Academic template detected, card has emails → `scrape_card_page()` (Example 5)
+- Hugo Academic template detected, card only has names → two-phase with individual page visit (Example 8)
 - Clear person link list exists → `scrape_lab()` (Example 2)
 - No fixed structure, but emails present → `scrape_by_email_anchor()` (Example 6)
 
@@ -532,6 +533,42 @@ Format results as a structured table:
 - For maximum coverage: use both platforms and merge results
 
 **Environment pitfall:** `pip install fitz` installs a WRONG abandoned package. Always use `pip install PyMuPDF`. In Colab, must restart runtime after fixing.
+
+### Example 8: Hugo Academic Two-Phase Scraping (列表页 → 个人页)
+
+**User Request:** "Find all members of TongClass (清华-北大通用人工智能实验班) and extract their info"
+
+**Execution (两阶段 Hugo Academic — 列表页+个人页):**
+1. Fetch list page: `https://tongclass.ac.cn/people/`
+2. Parse list page: alternating `h2` (grade headers like "清华 23 级") and `a[href*="/author/"]` (member links)
+3. Deduplicate: filter `Avatar` text nodes and duplicate URLs
+4. For each member's individual profile page:
+   - Extract email: Cloudflare XOR decrypt (`/cdn-cgi/l/email-protection#...`)
+   - Extract social links: GitHub (exclude `wowchemy`), Scholar, LinkedIn, Zhihu, Bilibili
+   - Filter placeholder links: URL-encoded "无" (`%e6%97%a0`)
+   - Extract interests via regex: `Interests\s*\n([\s\S]*?)(?=Education|$)`
+   - Extract education via regex: `Education\s*\n([\s\S]*?)(?=©|$)`
+   - Detect university from `.edu` domain links
+5. Save to CSV with `utf-8-sig`
+6. See `scripts/lab_member_scraper.py` for base implementation patterns
+
+**Performance benchmark (TongClass):**
+- 154 members from 6 grades (清华/北大 21-23 级)
+- Email: 145/154 (94%), GitHub: 66/154 (43%), Interests: 144/154 (94%)
+- Total time: ~30 seconds (0.2s delay × 154 pages)
+
+**Key insight:** This pattern bridges Example 2 (LAMDA two-phase) and Example 5 (Hugo Academic card-mode). When a Hugo Academic site's list page only shows names (no emails), you must visit individual profile pages. The grade/cohort headers in `h2` tags provide valuable metadata for grouping. The `Interests\s*\n([\s\S]*?)(?=Education|$)` regex pattern works on ANY Hugo Academic profile page.
+
+**Debugging journey (valuable decision framework):**
+1. `requests + BS4` → emails empty (Cloudflare protection)
+2. `Selenium` → WebDriver errors on Windows
+3. `Chrome DevTools MCP` → works but too slow for 154 pages
+4. `BrightData MCP` → emails still encrypted in HTML
+5. **XOR decrypt** → breakthrough! Cloudflare only does client-side XOR, the cipher text is in the HTML
+
+**When to use two-phase vs card-mode Hugo Academic:**
+- Card page has `.network-icon` with emails → card-mode (Example 5)
+- Card page only has names/photos, details on individual pages → two-phase (Example 8)
 
 ---
 

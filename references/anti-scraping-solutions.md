@@ -80,6 +80,27 @@ for link in card.select('.network-icon a'):
 | XOR 解密 | 95%+ | 免费 |
 | BrightData MCP | 99%+ | 付费 |
 
+**Cloudflare 邮箱保护的调试决策路径** (基于 TongClass 实战):
+
+当遇到 Cloudflare 邮箱保护时，不要直接上 Selenium/Playwright，按以下顺序排查:
+
+```
+1. requests + BS4 → 邮箱为空
+   ↓ 检查 HTML: 发现 /cdn-cgi/l/email-protection#...
+   ↓
+2. 尝试 Selenium → 可能在 Windows 上 WebDriver 报错
+   ↓ 不要继续调试 Selenium，换思路
+   ↓
+3. 关键认知: Cloudflare 邮箱保护只是客户端 XOR 加密
+   ↓ 密文已经在 HTML 中，不需要执行 JavaScript!
+   ↓
+4. 直接用 XOR 解密 → 成功!
+   ↓ 密钥 = 十六进制字符串的前 2 位
+```
+
+> **核心洞察**: Cloudflare Email Protection 不是服务端加密，密文和密钥都在 HTML 里。
+> `requests` 拿到的 HTML 就足以解密，完全不需要浏览器自动化。
+
 ---
 
 ### 2. 邮箱文本混淆（中国高校常见）
@@ -160,6 +181,36 @@ def extract_email_all_methods(soup, text_content):
 | 北大 PKU.AI | `stu.pku.edu.cn` | Cloudflare XOR |
 | 北大 PKU.AI (外部) | `gmail.com`, `outlook.com` 等 | Cloudflare XOR |
 | 通用 | `*.edu.cn` | 各种 |
+
+---
+
+### 2.5 URL 编码占位符过滤（Hugo Academic 常见）
+
+#### 问题描述
+
+部分 Hugo Academic 网站的成员在社交链接字段中填写了中文 "无" 作为占位符。这些文字在 URL 中被编码为 `%e6%97%a0`，导致提取出无效的社交链接：
+
+```html
+<!-- 成员填写了 "无" 作为 Twitter 链接 -->
+<a href="https://twitter.com/%e6%97%a0">Twitter</a>
+```
+
+#### 解决方案
+
+```python
+# 过滤 URL 编码的中文 "无" 占位符
+if '%e6%97%a0' not in href:
+    profile['twitter'] = href
+```
+
+**实战案例**: TongClass — 154 名成员中多人填写 "无" 作为 Twitter/LinkedIn 占位符。
+
+> **经验**: 任何从表单收集数据的学术网站都可能有此问题。除了 "无"，还可能出现 "N/A"、"none" 等占位符，建议统一过滤:
+> ```python
+> PLACEHOLDER_PATTERNS = ['%e6%97%a0', '/none', '/n/a', '/null']
+> if not any(p in href.lower() for p in PLACEHOLDER_PATTERNS):
+>     profile['twitter'] = href
+> ```
 
 ---
 
@@ -722,6 +773,9 @@ def extract_from_container(card_tag):
 │      │                                                       │
 │      ├─> 无固定 CSS 类名 (自定义 HTML)                       │
 │      │       └─> 邮箱反向定位法: 搜索 @ 节点 → DOM 回溯      │
+│      │                                                       │
+│      ├─> 社交链接含 "无"/%e6%97%a0 占位符                     │
+│      │       └─> URL 编码占位符过滤 (免费)                     │
 │      │                                                       │
 │      ├─> HTTP 403 Forbidden                                  │
 │      │       ├─> 检查 User-Agent → 设置浏览器 UA             │

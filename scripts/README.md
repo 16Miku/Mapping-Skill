@@ -88,6 +88,12 @@ members = scraper.scrape_card_page("https://pku.ai/people/")
 scraper = LabMemberScraper(base_url="https://media.au.tsinghua.edu.cn")
 members = scraper.scrape_by_email_anchor("https://media.au.tsinghua.edu.cn/Team.htm")
 # 通过邮箱文本节点反向查找人员卡片容器
+
+# 两阶段 Hugo Academic 模式 (如 TongClass)
+# 第一阶段: 从列表页提取成员 URL 列表 (含年级分组)
+# 第二阶段: 逐个访问个人页，用正则提取 Interests/Education 段落
+# 邮箱通过 Cloudflare XOR 解密提取
+# 参见 references/python-scraping-guide.md Section 6.6
 ```
 
 ---
