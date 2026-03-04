@@ -477,6 +477,121 @@ def scrape_with_selenium(url):
 
 ---
 
+### 7. 无固定 CSS 类名（自定义 HTML）
+
+#### 问题描述
+
+部分学术网站使用自定义 HTML，没有固定的 CSS 类名（如 `.people-person`），或者类名无意义（如 `.div1`, `.box2`），导致传统的 CSS 选择器方法失效。
+
+**典型场景**: 清华 MediaLab 等自定义 HTML 网站，页面结构混乱，无法通过 CSS 选择器定位人员卡片。
+
+#### 解决方案
+
+**邮箱反向定位法**（免费，防御性策略）：
+
+```python
+import re
+from bs4 import BeautifulSoup
+
+def scrape_by_email_anchor(page_url, base_url):
+    """
+    通过邮箱文本节点反向查找人员卡片容器
+
+    核心策略:
+    1. 搜索所有包含 @ 的文本节点
+    2. 向上回溯 DOM 树 (最多 4 层)
+    3. 容器识别启发式规则:
+       - 必须是 div 或 li 标签
+       - 文本长度在 20-3000 字符之间
+       - 去重：同一容器只处理一次
+    """
+    soup = BeautifulSoup(html, 'html.parser')
+
+    # 1. 查找所有包含 @ 的文本节点
+    email_nodes = soup.find_all(string=re.compile(r'@'))
+
+    processed_containers = []  # 去重
+    members = []
+
+    for node in email_nodes:
+        # 2. 向上回溯，找到人员卡片容器
+        container = node.parent
+
+        # 向上找 4 层
+        for _ in range(4):
+            if container and (container.name == 'div' or container.name == 'li'):
+                # 3. 容器识别启发式规则
+                txt_len = len(container.get_text())
+                if 20 < txt_len < 3000:  # 单人卡片文本长度范围
+                    if container not in processed_containers:
+                        processed_containers.append(container)
+
+                        # 解析该卡片
+                        person = extract_from_container(container)
+                        members.append(person)
+                        break
+
+            if container.parent:
+                container = container.parent
+            else:
+                break
+
+    return members
+
+
+def extract_from_container(card_tag):
+    """从容器中提取信息"""
+    lines = [line.strip() for line in card_tag.get_text(separator="\n").split('\n') if line.strip()]
+
+    # 提取邮箱
+    email_pattern = re.compile(r'[\w\.-]+@[\w\.-]+\.[a-zA-Z]{2,}')
+    email = None
+    for line in lines:
+        if "@" in line:
+            match = email_pattern.search(line)
+            if match:
+                email = match.group(0)
+                break
+
+    # 提取姓名 (第一行，过滤掉头衔词)
+    raw_name = lines[0] if lines else ""
+    if raw_name in ["All Faculty", "Team", "Members"]:
+        raw_name = lines[1] if len(lines) > 1 else ""
+
+    # 分离中英文名
+    cn_name = "".join(re.findall(r'[\u4e00-\u9fa5]+', raw_name))
+    en_name = re.sub(r'[\u4e00-\u9fa5]+', '', raw_name).strip()
+
+    return {
+        "name": en_name or cn_name,
+        "cn_name": cn_name,
+        "en_name": en_name,
+        "email": email
+    }
+```
+
+**完整参考实现**: `scripts/lab_member_scraper.py` (`scrape_by_email_anchor()` 方法)
+
+#### 实战案例
+
+**清华 MediaLab**: 39 名成员，通过 `@tsinghua.edu.cn` 反向定位人员卡片，100% 提取成功。
+
+**关键处理要点**:
+1. **容器识别启发式**: 文本长度 20-3000 字符，太短是空标签，太长是整个 body
+2. **中英文名分离**: `re.findall(r'[\u4e00-\u9fa5]+')` 提取中文，`re.sub` 去除中文得到英文
+3. **过滤页脚联系方式**: 排除包含 "Address", "Mailbox", "Contact" 的条目
+4. **去重机制**: 同一容器只处理一次，避免重复提取
+
+#### 成功率
+
+| 方案 | 成功率 | 成本 | 适用场景 |
+|------|--------|------|---------|
+| CSS 选择器 | 95%+ | 免费 | 模板网站 (Hugo Academic 等) |
+| 邮箱反向定位 | 90%+ | 免费 | 自定义 HTML、无固定类名 |
+| BrightData MCP | 99%+ | 付费 | 高反爬网站 |
+
+---
+
 ## 决策流程图
 
 ```
@@ -494,6 +609,9 @@ def scrape_with_selenium(url):
 │      │                                                       │
 │      ├─> SSL: SSLV3_ALERT_HANDSHAKE_FAILURE                  │
 │      │       └─> 跳过该 URL / 尝试 HTTP / verify=False       │
+│      │                                                       │
+│      ├─> 无固定 CSS 类名 (自定义 HTML)                       │
+│      │       └─> 邮箱反向定位法: 搜索 @ 节点 → DOM 回溯      │
 │      │                                                       │
 │      ├─> HTTP 403 Forbidden                                  │
 │      │       ├─> 检查 User-Agent → 设置浏览器 UA             │

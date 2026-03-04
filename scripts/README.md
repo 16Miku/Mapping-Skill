@@ -11,7 +11,7 @@
 | `serper_search.py` | Serper API 搜索模板 | httpx, python-dotenv |
 | `httpx_scraper.py` | 异步 HTTP 爬虫 | httpx |
 | `cloudflare_email_decoder.py` | Cloudflare 邮箱解密 | 无 |
-| `lab_member_scraper.py` | 实验室成员爬取 (两阶段模式 + Hugo Academic 卡片模式，含 [at] 解析和 CF 解密) | requests, beautifulsoup4 |
+| `lab_member_scraper.py` | 实验室成员爬取 (三种模式: 两阶段/Hugo Academic 卡片/邮箱反向定位，含 [at] 解析和 CF 解密) | requests, beautifulsoup4 |
 | **`openreview_scraper.py`** | **OpenReview 会议论文爬取** (含 Profile 缓存、Email 三级回退、ORCID 拼接) | **openreview-py, pandas** |
 | **`github_network_scraper.py`** | **GitHub 社交网络爬取** (Following/Followers 遍历 + 三层数据拼装) | **requests, pandas, openpyxl** |
 
@@ -75,6 +75,11 @@ from lab_member_scraper import LabMemberScraper
 scraper = LabMemberScraper(base_url="https://pku.ai")
 members = scraper.scrape_card_page("https://pku.ai/people/")
 # 自动解密 Cloudflare 保护的邮箱
+
+# 使用邮箱反向定位模式爬取自定义 HTML 网站 (如清华 MediaLab)
+scraper = LabMemberScraper(base_url="https://media.au.tsinghua.edu.cn")
+members = scraper.scrape_by_email_anchor("https://media.au.tsinghua.edu.cn/Team.htm")
+# 通过邮箱文本节点反向查找人员卡片容器
 ```
 
 ---

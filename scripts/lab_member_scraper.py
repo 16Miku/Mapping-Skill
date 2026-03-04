@@ -2,16 +2,18 @@
 实验室成员批量爬取模板
 
 从实验室人员页面批量爬取成员信息，适用于学术实验室网站。
-基于 LAMDA (南大)、TongClass (清华-北大)、PKU.AI (北大) 实战验证。
+基于 LAMDA (南大)、TongClass (清华-北大)、PKU.AI (北大)、清华 MediaLab 实战验证。
 
 实战案例:
 - LAMDA: 108 名博士生，URL 格式 /Name/ (ASP.NET .ashx 页面)，两阶段爬取
 - TongClass: 154 名成员，URL 格式 /author/Name/ (Hugo Academic)，两阶段爬取
 - PKU.AI: 65 名成员，单页卡片提取 (.people-person + Cloudflare 解密)
+- 清华 MediaLab: 39 名成员，邮箱反向定位法 (无固定 CSS 类名)
 
-支持两种爬取模式:
+支持三种爬取模式:
 - 两阶段模式: scrape_lab() — 列表页 → 详情页 (适用于 LAMDA 等)
 - 卡片模式: scrape_card_page() — 单页卡片提取 (适用于 Hugo Academic/Wowchemy)
+- 邮箱反向定位: scrape_by_email_anchor() — 通过邮箱文本节点反向查找人员容器 (适用于自定义 HTML)
 
 依赖:
     pip install requests beautifulsoup4
@@ -26,6 +28,10 @@
     # 卡片模式 (PKU.AI、Hugo Academic 等)
     scraper = LabMemberScraper(base_url="https://pku.ai")
     members = scraper.scrape_card_page("https://pku.ai/people/")
+
+    # 邮箱反向定位模式 (清华 MediaLab 等自定义 HTML)
+    scraper = LabMemberScraper(base_url="https://media.au.tsinghua.edu.cn")
+    members = scraper.scrape_by_email_anchor("https://media.au.tsinghua.edu.cn/Team.htm")
 
     for member in members:
         print(f"{member.name}: {member.email}")
@@ -366,6 +372,204 @@ class LabMemberScraper:
             return ''
         except Exception:
             return ''
+
+    def scrape_by_email_anchor(self, page_url: str, max_members: Optional[int] = None) -> List[MemberProfile]:
+        """
+        邮箱反向定位模式：通过搜索邮箱文本节点，向上回溯 DOM 树找到人员卡片容器
+
+        适用于无固定 CSS 类名、自定义 HTML 结构的学术网站。
+        当页面结构混乱、无法通过 CSS 选择器定位时，使用此防御性策略。
+
+        实战案例:
+        - 清华 MediaLab: 39 名成员，通过 @tsinghua.edu.cn 反向定位人员卡片
+        - 适用于自定义 HTML、无模板、结构不规范的学术网站
+
+        核心策略:
+        1. 搜索所有包含 @ 的文本节点 (邮箱特征)
+        2. 向上回溯 DOM 树 (最多 4 层)，寻找人员卡片容器
+        3. 容器识别启发式规则:
+           - 必须是 div 或 li 标签
+           - 文本长度在 20-3000 字符之间 (单人卡片范围)
+           - 去重：同一容器只处理一次
+        4. 从容器中提取姓名、邮箱、头衔、社交链接
+        5. 可选：访问详情页获取更多信息
+
+        Args:
+            page_url: 人员列表页 URL
+            max_members: 限制提取数量 (用于调试)
+
+        Returns:
+            成员资料列表
+        """
+        # 自动推断 base_url
+        if not self.base_url:
+            self.base_url = '/'.join(page_url.split('/')[:3])
+
+        print(f"正在使用邮箱反向定位法爬取: {page_url}")
+
+        try:
+            response = self.session.get(page_url, timeout=15, verify=False)
+            response.encoding = response.apparent_encoding or 'utf-8'
+            soup = BeautifulSoup(response.text, 'html.parser')
+        except Exception as e:
+            print(f"页面请求失败: {e}")
+            return []
+
+        # 查找所有包含 @ 的文本节点
+        email_nodes = soup.find_all(string=re.compile(r'@'))
+        print(f"发现 {len(email_nodes)} 个潜在的邮箱节点，正在解析人员结构...")
+
+        processed_containers = []  # 去重：防止同一容器被多次处理
+        members = []
+        email_count = 0
+
+        for node in email_nodes:
+            # 向上回溯，找到人员卡片容器
+            container = node.parent
+            found_card = False
+
+            # 向上找 4 层
+            for _ in range(4):
+                if container and (container.name == 'div' or container.name == 'li'):
+                    # 容器识别启发式规则
+                    txt_len = len(container.get_text())
+                    if 20 < txt_len < 3000:  # 单人卡片文本长度范围
+                        if container not in processed_containers:
+                            processed_containers.append(container)
+
+                            # 解析该卡片
+                            profile = self._extract_from_email_card(container)
+
+                            # 过滤无效数据
+                            if profile.name or profile.name_cn:
+                                # 排除页脚联系方式 (通常包含 Address, Mailbox 等关键词)
+                                if any(kw in (profile.name + profile.name_cn) for kw in ['Address', 'Mailbox', 'Contact', 'Office']):
+                                    continue
+
+                                # 如果有详情页链接，深入抓取
+                                if profile.source_url and profile.source_url != page_url:
+                                    print(f"  -> 深入抓取详情页: {profile.source_url}")
+                                    try:
+                                        sub_soup = self._get_soup_safe(profile.source_url)
+                                        if sub_soup:
+                                            more_text = sub_soup.get_text(separator='\n')
+                                            profile.bio = more_text[:3000]
+                                            # 提取额外的社交链接
+                                            self._extract_all_links(sub_soup, profile)
+                                    except:
+                                        pass
+
+                                members.append(profile)
+                                if profile.email:
+                                    email_count += 1
+                                print(f"  ✅ 提取成功: {profile.name or profile.name_cn} ({profile.email or 'No Email'})")
+
+                            found_card = True
+                            break
+
+                if container.parent:
+                    container = container.parent
+                else:
+                    break
+
+            if max_members and len(members) >= max_members:
+                break
+
+        print(f"\n成功提取 {len(members)} 名成员")
+        print(f"邮箱覆盖: {email_count}/{len(members)} ({email_count*100//max(len(members),1)}%)")
+        return members
+
+    def _extract_from_email_card(self, card_tag) -> MemberProfile:
+        """
+        从邮箱反向定位到的卡片容器中提取信息
+
+        处理流程:
+        1. 提取所有文本行
+        2. 提取邮箱 (必定存在，因为是通过邮箱定位到的)
+        3. 提取姓名 (通常是第一行，过滤掉头衔词)
+        4. 提取头衔 (包含 Professor, PhD, Master 等关键词的行)
+        5. 提取详情页链接 (相对路径或本站链接)
+        6. 提取社交链接 (GitHub, Scholar, LinkedIn 等)
+        """
+        profile = MemberProfile()
+
+        # 1. 提取所有文本行
+        lines = [line.strip() for line in card_tag.get_text(separator="\n").split('\n') if line.strip()]
+
+        # 2. 提取邮箱
+        email_pattern = re.compile(r'[\w\.-]+@[\w\.-]+\.[a-zA-Z]{2,}')
+        for line in lines:
+            if "@" in line:
+                match = email_pattern.search(line)
+                if match:
+                    profile.email = match.group(0)
+                    break
+
+        # 3. 提取姓名 (第一行，过滤掉头衔词)
+        raw_name_line = lines[0] if lines else ""
+        # 过滤掉常见的页面标题
+        if raw_name_line in ["All Faculty", "Postdoctoral Fellow", "Team", "Principal Investigator", "Members"]:
+            raw_name_line = lines[1] if len(lines) > 1 else ""
+
+        # 分离中英文名
+        cn_name = "".join(re.findall(r'[\u4e00-\u9fa5]+', raw_name_line))
+        en_name = re.sub(r'[\u4e00-\u9fa5]+', '', raw_name_line).strip()
+
+        if cn_name:
+            profile.name_cn = cn_name
+        if en_name:
+            profile.name = en_name
+
+        # 4. 提取头衔
+        for line in lines:
+            if any(kw in line for kw in ["Professor", "Researcher", "Fellow", "Ph.D", "PhD", "Master", "Student"]):
+                if len(line) < 50:  # 头衔通常不长
+                    profile.role = self._extract_role(line)
+                    break
+
+        # 5. 提取详情页链接
+        links = card_tag.find_all('a', href=True)
+        for a in links:
+            href = a['href']
+            # 排除 mailto 和外部链接
+            if "mailto:" not in href:
+                if "http" not in href:
+                    # 相对路径
+                    full_link = urljoin(self.base_url, href)
+                    profile.source_url = full_link
+                    break
+                elif self.base_url in href:
+                    # 本站链接
+                    profile.source_url = href
+                    break
+
+        # 6. 提取社交链接
+        for link in links:
+            href = link.get('href', '')
+            if not href:
+                continue
+
+            href_lower = href.lower()
+            if 'github.com' in href_lower and 'wowchemy' not in href_lower:
+                if not profile.github:
+                    profile.github = href
+            elif 'scholar.google' in href_lower:
+                if not profile.google_scholar:
+                    profile.google_scholar = href
+            elif 'linkedin.com' in href_lower:
+                if not profile.linkedin:
+                    profile.linkedin = href
+
+        return profile
+
+    def _get_soup_safe(self, url: str):
+        """安全地获取 BeautifulSoup 对象，处理异常"""
+        try:
+            response = self.session.get(url, timeout=10, verify=False)
+            response.encoding = response.apparent_encoding or 'utf-8'
+            return BeautifulSoup(response.text, 'html.parser')
+        except:
+            return None
 
     def _get_member_entries(self, lab_url: str) -> List[Dict]:
         """
@@ -809,11 +1013,18 @@ if __name__ == "__main__":
     # 适用于: Hugo Academic / Wowchemy 模板网站
 
     # 示例: 爬取 PKU.AI 成员 (含 Cloudflare 邮箱解密)
-    scraper = LabMemberScraper(base_url="https://pku.ai")
-    members = scraper.scrape_card_page("https://pku.ai/people/", max_members=5)
+    # scraper = LabMemberScraper(base_url="https://pku.ai")
+    # members = scraper.scrape_card_page("https://pku.ai/people/", max_members=5)
+
+    # === 模式 3: 邮箱反向定位 (防御性策略) ===
+    # 适用于: 无固定 CSS 类名、自定义 HTML 结构
+
+    # 示例: 爬取清华 MediaLab 成员 (邮箱反向定位)
+    scraper = LabMemberScraper(base_url="https://media.au.tsinghua.edu.cn")
+    members = scraper.scrape_by_email_anchor("https://media.au.tsinghua.edu.cn/Team.htm", max_members=5)
 
     # 全量模式:
-    # members = scraper.scrape_card_page("https://pku.ai/people/")
+    # members = scraper.scrape_by_email_anchor("https://media.au.tsinghua.edu.cn/Team.htm")
 
     # 打印结果
     print(f"\n=== 共 {len(members)} 名成员 ===")

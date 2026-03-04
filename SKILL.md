@@ -441,6 +441,66 @@ Format results as a structured table:
 
 **Key insight:** Hugo Academic is the most popular academic website template. Recognizing `.people-person` + `.network-icon` CSS classes lets you extract all data from one page without visiting individual profile pages. Always check for Cloudflare email protection (`email-protection` in href) before converting relative URLs to absolute.
 
+### Example 6: Email Anchor Reverse Lookup (防御性爬虫策略)
+
+**User Request:** "Find all members of Tsinghua MediaLab (custom HTML, no fixed CSS classes)"
+
+**Execution (邮箱反向定位法 — 适用于自定义 HTML):**
+1. Recognize the challenge: page has no `.people-person` or other fixed CSS classes
+2. Use email anchor strategy: search for all text nodes containing `@`
+3. For each email node, traverse up the DOM tree (max 4 levels) to find the person card container
+4. Container recognition heuristics:
+   - Must be `div` or `li` tag
+   - Text length between 20-3000 characters (single person card range)
+   - Deduplicate: process each container only once
+5. Extract from container:
+   - Name: first line (filter out "All Faculty", "Team" etc.)
+   - Split Chinese/English: `re.findall(r'[\u4e00-\u9fa5]+')` for Chinese, `re.sub` to remove Chinese for English
+   - Email: regex match `[\w\.-]+@[\w\.-]+\.[a-zA-Z]{2,}`
+   - Title: lines containing "Professor", "PhD", "Master", "Student"
+   - Detail page link: relative or same-domain links (exclude `mailto:`)
+6. Optional: visit detail page for more info (bio, publications, social links)
+7. Filter out footer contact info (containing "Address", "Mailbox", "Contact")
+8. See `scripts/lab_member_scraper.py` (`scrape_by_email_anchor()`) for implementation
+
+**Performance benchmark (Tsinghua MediaLab):**
+- 39 members extracted from 39 email nodes
+- 100% extraction success rate (all email nodes correctly mapped to person cards)
+- Handles mixed Chinese/English names: "Lu Fang 方路" → `cn_name="方路"`, `en_name="Lu Fang"`
+
+**Key insight:** Email anchor reverse lookup is a defensive scraping strategy for when all else fails. It doesn't rely on CSS classes or page structure — only on the universal presence of email addresses on academic websites. The DOM traversal heuristic (20-3000 char text length) effectively filters out empty tags and full-page containers.
+
+**When to use each method:**
+- Hugo Academic template detected → `scrape_card_page()` (Example 5)
+- Clear person link list exists → `scrape_lab()` (Example 2)
+- No fixed structure, but emails present → `scrape_by_email_anchor()` (Example 6)
+
+### Example 5: Hugo Academic Card Parsing with Cloudflare Decryption
+
+**User Request:** "Find all members of PKU.AI lab and extract their emails"
+
+**Execution (单页卡片提取 — Hugo Academic 模板):**
+1. Detect Hugo Academic template: look for `.people-person` or `.media.stream-item` CSS classes
+2. Fetch single page: `https://pku.ai/people/` (only 1 HTTP request needed)
+3. For each `.people-person` card:
+   - Extract name from `.portrait-title h2`
+   - Extract role/affiliation from `.portrait-title h3` and `.portrait-subtitle`
+   - Extract social links from `.network-icon a`
+4. For Cloudflare-protected emails in `.network-icon a`:
+   - Detect `/cdn-cgi/l/email-protection#` in href
+   - Extract hex string after `#`, XOR decrypt with first byte as key
+   - `continue` to skip further link classification
+5. For relative URLs (`/path`): prepend base URL (`https://pku.ai` + `/path`)
+6. Classify remaining links: GitHub, Scholar, LinkedIn, Zhihu, Bilibili
+7. See `scripts/lab_member_scraper.py` (`scrape_card_page()`) for implementation
+
+**Performance benchmark (PKU.AI):**
+- 65 members extracted from single page in <1 second
+- 30+ Cloudflare emails successfully decrypted (~95% success rate on encrypted emails)
+- Only 1 HTTP request (vs 66+ for two-phase approach)
+
+**Key insight:** Hugo Academic is the most popular academic website template. Recognizing `.people-person` + `.network-icon` CSS classes lets you extract all data from one page without visiting individual profile pages. Always check for Cloudflare email protection (`email-protection` in href) before converting relative URLs to absolute.
+
 ---
 
 ## Best Practices
