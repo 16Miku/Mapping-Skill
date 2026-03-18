@@ -1,620 +1,346 @@
 ---
 name: ai-talent-recruiter
-description: Complete AI talent discovery and outreach workflow using BrightData MCP or Python scraping. This skill should be used when users need to find PhD students, researchers, or engineers in AI/ML fields, extract their profiles, identify Chinese candidates, classify by type, deduplicate, and generate personalized outreach emails.
+description: AI/ML 人才搜索、论文作者发现、实验室成员爬取、GitHub 研究者挖掘与个性化招聘邮件生成 skill。只要用户提到查找 AI/ML PhD、研究员、工程师，抓取实验室成员、OpenReview/CVF 会议作者、GitHub 网络研究者，提取主页/Scholar/GitHub/邮箱/研究方向，识别华人、分类去重，或把结果导入飞书多维表格并批量生成邮件，就应该优先使用这个 skill；即使用户没有明确说“使用 Mapping-Skill / ai-talent-recruiter”，只要任务属于这些复合工作流，也应触发。
 ---
 
 # AI Talent Recruiter
 
-A comprehensive skill for AI/ML talent discovery, profiling, and personalized outreach.
+面向 Claude Code 与 OpenClaw 的 AI/ML 人才搜索与触达执行手册。
 
-## Overview
+## 项目链接
 
-This skill enables the complete talent recruitment pipeline:
-1. **Search**: Generate optimized queries and discover candidates via web search
-2. **Extract**: Scrape profile pages and extract structured candidate information
-3. **Identify**: Recognize Chinese candidates using surname and institution matching
-4. **Classify**: Categorize candidates by type (PhD/PostDoc/Professor/Industry)
-5. **Deduplicate**: Remove duplicate candidates using 7-level fingerprinting
-6. **Standardize**: Map research fields to 22 standardized categories
-7. **Generate**: Create personalized outreach emails using field-specific templates
+- GitHub: https://github.com/16Miku/Mapping-Skill
+- ClawHub: https://clawhub.ai/16Miku/mapping-skill
 
-## Scraping Approach Selection
+## 这个 skill 具备的能力
 
-This skill supports two scraping approaches:
+当用户提出以下任务时，应优先启用本 skill：
 
-| Approach | Best For | Cost | Success Rate |
-|----------|----------|------|--------------|
-| **BrightData MCP** (Recommended) | LinkedIn, Twitter, high-anti-scraping sites | Paid | High (99%+) |
-| **Python Scraping** | Academic sites (.edu), personal homepages | Free | Medium (70-85%) |
+1. 搜索 AI/ML PhD、研究员、工程师
+2. 抓取实验室成员主页并提取结构化信息
+3. 抓取 OpenReview / CVF 论文作者信息
+4. 从 GitHub following/followers 网络中发现研究者
+5. 对给定 URL 执行全量学者信息抽取
+6. 识别华人候选人、分类、去重、标准化研究方向
+7. 基于候选人信息生成个性化招聘邮件
+8. 将 CSV 或爬取结果导入飞书多维表格
+9. 在飞书表格中批量生成并回写推荐邮件
 
-### Selection Guidelines
+## 执行原则
 
-- **Use Python scraping** for academic websites (.edu, .github.io) - **FREE**
-- **Use BrightData MCP** for LinkedIn and sites requiring login - **PAID**
-- See `references/python-scraping-guide.md` for detailed implementation
+1. **先判定任务类型，再选方法**
+   - Topic search
+   - Lab search
+   - Conference author search
+   - GitHub network discovery
+   - Given-URL extraction
+   - Feishu email workflow
 
-## Prerequisites
+2. **优先复用已有 references 与 scripts**
+   不要从零发明流程。先检查 `references/` 与 `scripts/` 是否已有成熟模式。
 
-### Option A: BrightData MCP (Paid)
+3. **优先选择最稳定的数据入口**
+   - OpenReview 会议优先 API
+   - CVF 会议优先 HTML + PDF
+   - Hugo Academic 页面优先模板化解析
+   - 页面结构混乱但邮箱明显时，使用邮箱反向定位法
 
-This approach requires the BrightData MCP server to be configured in Claude Code.
+4. **抽取与清洗并重**
+   结果必须尽量结构化，并在输出前做分类、去重与字段标准化。
 
-1. Get your API token from [BrightData](https://brightdata.com)
-2. Add the MCP server using Claude CLI:
+5. **邮件必须基于真实信息个性化**
+   `technical_hook` 和 `talk_track_paragraph` 不能空泛，必须和候选人论文、研究方向或主页内容关联。
 
-```bash
-claude mcp add --transport sse --scope user brightdata "https://mcp.brightdata.com/sse?token=<your-api-token>"
+6. **如用户涉及 OpenClaw / 飞书场景，要显式考虑导表和字段回写**
+   对此类需求，结果不应只停留在本地 CSV。
+
+## 平台使用说明
+
+### Claude Code
+
+适用于：
+- 本地脚本执行
+- MCP 工具调用
+- CSV 导出
+- 以本地文件和结构化结果为主要交付物
+
+安装方式通常是把 skill 放到 `~/.claude/skills/` 目录。
+
+### OpenClaw
+
+适用于：
+- skill 目录托管与刷新
+- slash commands 调用
+- ClawHub 分发
+- 飞书、多工具联动工作流
+
+OpenClaw 常见技能加载位置：
+- `<workspace>/skills`
+- `~/.openclaw/skills`
+- 内置 skills
+
+也可通过 ClawHub 安装，并通过“刷新 skills”或重启网关重新索引。
+
+## 工作流
+
+### Step 1：识别输入任务与目标输出
+
+先明确：
+- 搜索范围是 topic、lab、conference、GitHub network 还是给定 URL
+- 输出要求是候选人列表、CSV、飞书入表、邮件生成，还是全流程都要
+- 是否需要识别华人、是否需要邮箱、是否需要导入飞书
+
+### Step 2：选择数据源与抓取方式
+
+#### 方法选择矩阵
+
+| 场景 | 首选方案 | 备用方案 |
+|------|----------|----------|
+| OpenReview 会议 | `scripts/openreview_scraper.py` + API | 搜索 + 主页回补 |
+| CVF 会议 | `scripts/cvf_paper_scraper.py` | 补抓 PDF / 页面回退 |
+| Hugo Academic 单页卡片 | `lab_member_scraper.py` 的 card 模式 | BrightData |
+| 实验室列表页 + 个人页 | `lab_member_scraper.py` 的两阶段模式 | BrightData |
+| 无固定结构但含邮箱 | 邮箱反向定位法 | BrightData / 手工规则 |
+| GitHub 研究者网络 | `scripts/github_network_scraper.py` | 网页搜索辅助 |
+| LinkedIn / 强反爬站点 | BrightData MCP | 降级到公开网页信息 |
+| 给定任意 URL | BrightData MCP 或定制脚本 | 多源补充 |
+
+### Step 3：执行抽取
+
+根据场景读取相应脚本或 reference：
+
+- 搜索模板：`references/search-templates.md`
+- Python 爬取：`references/python-scraping-guide.md`
+- 反爬处理：`references/anti-scraping-solutions.md`
+- URL 优先级：`references/url-priority-rules.md`
+- 会议抓取：`references/conference-paper-scraping.md`
+
+### Step 4：结构化与标准化
+
+至少尽量抽取这些字段：
+- 中文名 / 英文名
+- title / role
+- affiliation
+- research_interests / research_field
+- education / experience
+- publications
+- homepage / Google Scholar / GitHub / LinkedIn / Zhihu / Bilibili
+- email
+
+然后继续做：
+- 华人识别：`references/chinese-surnames.md`
+- 候选人分类：`references/candidate-classifier.md`
+- 去重：`references/deduplication-rules.md`
+- 研究方向标准化：`references/field-mappings.md`
+
+### Step 5：邮件生成
+
+读取：
+- `references/email-templates.md`
+- `references/talk-tracks.md`
+
+生成邮件时必须填充：
+- `researcher_name`
+- `context_affiliation`
+- `research_field`
+- `technical_hook`
+- `talk_track_paragraph`
+
+### Step 6：结果交付
+
+根据用户要求输出为：
+- Markdown 结构化表格
+- CSV 文件
+- 飞书多维表格
+- 飞书表格中的“推荐邮件”字段
+
+## OpenClaw / 飞书工作流要点
+
+如果用户明确提到 OpenClaw、飞书、多维表格、导表或批量写邮件，应把这些步骤视为本 skill 的标准能力，而不是额外加分项。
+
+### 标准能力
+
+1. 解析飞书多维表格链接
+2. 提取 `app_token` / `table_id`
+3. 批量读取记录
+4. 依据论文标题或候选人关键词映射研究方向
+5. 批量生成个性化邮件
+6. 创建新字段并批量更新记录
+7. 返回飞书链接、成功/失败统计与原因
+
+## 最佳实践提示词
+
+后续如果有新的实践文档，应继续沉淀到 `references/prompt-best-practices.md`。当前优先复用下面几类高价值提示词模式。
+
+### 1. OpenReview 论文爬取 + 飞书入表
+
+```text
+请执行 OpenReview 论文爬取任务：
+1. 使用 skills/Mapping-Skill/scripts/openreview_scraper.py 脚本
+2. 初始化爬虫时使用 api2.openreview.net 端点：
+   scraper = OpenReviewScraper(
+       username='XXXXXXX',
+       password='XXXXXXX',
+       baseurl='https://api2.openreview.net'
+   )
+3. 爬取 ICLR2025 的 5 篇论文（测试）+ https://openreview.net/group?id=ICLR.cc/2025/Conference#tab-accept-oral（记着替换链接）
+4. 保存 CSV 到 /tmp/ 目录
+5. 创建新的飞书多维表格，按照 Mapping-Skill/scripts/openreview_scraper.py 脚本中爬取的数据来创建相应字段
+6. 批量导入数据到多维表格
+7. 返回多维表格链接和统计信息
 ```
 
-Replace `<your-api-token>` with your actual BrightData API key.
+### 2. CVF 论文爬取 + 邮箱提取 + 飞书入表
 
-3. Verify the MCP server is connected by checking available tools:
-   - `mcp__brightdata__search_engine` - For web searches
-   - `mcp__brightdata__scrape_as_markdown` - For page scraping
-   - `mcp__brightdata__web_data_linkedin_person_profile` - For LinkedIn profiles
-
-### Option B: Python Scraping (Free)
-
-Requires Python dependencies:
-
-```bash
-pip install requests beautifulsoup4 httpx python-dotenv
+```text
+请执行 CVF 论文爬取任务：
+1. 使用 skills/Mapping-Skill/scripts/cvf_paper_scraper.py 脚本
+2. 严格按照脚本中的 extract_emails_from_text() 函数提取邮箱
+3. 爬取 ICCV2025 的 5 篇论文（测试）+ https://openaccess.thecvf.com/ICCV2025?day=all（记着替换链接）
+4. 保存 CSV 到 /tmp/ 目录
+5. 创建新的飞书多维表格，按照 Mapping-Skill/scripts/cvf_paper_scraper.py 脚本中爬取的数据来创建相应字段
+6. 批量导入数据到多维表格
+7. 返回多维表格链接和邮箱提取统计
 ```
 
-See reference scripts in `scripts/` directory for implementation templates.
+### 3. 飞书表格批量写邮件
 
-## Reference Files
-
-| File | Purpose |
-|------|---------|
-| `references/search-templates.md` | Search query templates and keywords |
-| `references/profile-schema.md` | Candidate profile data structure |
-| `references/top-ai-labs.md` | List of top AI research labs |
-| `references/field-mappings.md` | 22 standardized research fields |
-| `references/talk-tracks.md` | Technical talking points by field |
-| `references/email-templates.md` | Personalized email templates |
-| `references/chinese-surnames.md` | Chinese surname database |
-| `references/deduplication-rules.md` | Candidate deduplication rules |
-| `references/candidate-classifier.md` | Candidate type classification |
-| **`references/python-scraping-guide.md`** | **Python scraping techniques** |
-| **`references/url-priority-rules.md`** | **URL filtering and prioritization** |
-| **`references/anti-scraping-solutions.md`** | **Anti-scraping solutions** |
-| **`references/conference-paper-scraping.md`** | **Conference paper scraping (OpenReview + CVF)** |
-
-## Scripts (Reference Implementations)
-
-| Script | Purpose |
-|--------|---------|
-| `scripts/serper_search.py` | Serper API search template |
-| `scripts/httpx_scraper.py` | Async HTTP scraper |
-| `scripts/cloudflare_email_decoder.py` | Cloudflare email decryption |
-| `scripts/lab_member_scraper.py` | Lab member scraper (two-phase + card mode with CF decrypt) |
-| `scripts/openreview_scraper.py` | OpenReview conference scraper |
-| **`scripts/cvf_paper_scraper.py`** | **CVF paper scraper (CVPR/ICCV/WACV, HTML+PDF email extraction)** |
-| `scripts/github_network_scraper.py` | GitHub social network scraper (Following/Followers) |
-
----
-
-## Complete Workflow
-
-### Step 1: Generate Search Queries
-
-Based on the user's research direction, generate 2-4 search queries using templates from `references/search-templates.md`.
-
-**Query Generation Strategy:**
-- Include both English and Chinese keywords
-- Target high-quality domains: `github.io`, university sites, LinkedIn
-- Combine research direction with role indicators
-
-**Example queries for "Reinforcement Learning":**
-```
-"reinforcement learning" PhD student site:github.io OR site:stanford.edu
-"RLHF" "PPO" PhD researcher personal homepage
-强化学习 博士生 清华 OR 北大 个人主页
+```text
+请执行论文作者邮件生成任务：
+【数据源】
+表格链接：
+【第一步：解析表格链接】
+1. 从链接中提取 app_token（格式：/base/{app_token}）
+2. 调用 feishu_bitable_app_table 的 list 接口获取 table_id
+3. 验证表格可访问性
+【第二步：分批读取论文数据】
+1. 使用 feishu_bitable_app_table_record 的 list 操作
+2. 分批读取（每批50条），使用 page_token 分页
+3. 只提取必要字段：记录ID、论文标题、作者、邮箱、机构
+4. 过滤条件：只处理有邮箱的记录
+【第三步：确定研究领域】
+1. 读取 skills/Mapping-Skill/references/field-mappings.md
+2. 根据论文标题和关键词，使用映射规则确定研究领域
+3. 示例：
+   - "Symmetry Understanding of 3D Shapes" → Computer Vision
+   - "Efficient Adaptation of Vision Transformer" → NLP
+【第四步：生成个性化邮件】
+1. 读取 skills/Mapping-Skill/references/email-templates.md
+2. 根据研究领域选择对应模板（共22个领域）
+3. 填充占位符：
+   - {{researcher_name}} → 第一作者姓名
+   - {{context_affiliation}} → 机构
+   - {{research_field}} → 研究领域
+   - {{technical_hook}} → 基于论文标题生成
+   - {{talk_track_paragraph}} → 从 talk-tracks.md 选择
+【第五步：批量更新多维表格】
+1. 在多维表格中创建新字段："推荐邮件"（多行文本）
+2. 使用 batch_update 批量更新每条记录
+3. 每批最多 500 条
+【第六步：验证和统计】
+1. 验证邮件内容个性化
+2. 返回统计：总计 X 条 / 成功 Y 条 / 失败 Z 条
+3. 列出失败原因
+【输出】
+- 多维表格链接
+- 生成统计
+- 失败原因列表
 ```
 
-### Step 2: Execute Searches
+### 4. 给定某 URL 全量抽取并入表
 
-#### Option A: BrightData MCP (Paid)
-
-Use `mcp__brightdata__search_engine` with parallel execution:
-
-```
-Tool: mcp__brightdata__search_engine
-Parameters:
-  engine: "google"
-  query: "<generated_query>"
+```text
+1、请你调用BrightData-MCP工具，或者编写爬虫脚本，爬取 <某网站URL> 页面中的所有人员信息。
+2、提取信息包括中文名，英文名，个人介绍信息、学术方向、学校和专业信息、工作经历、近期论文著作信息（包含论文名和论文链接）、github链接、个人主页链接、谷歌学术链接、领英链接、知乎链接、B站链接、邮箱等。
+3、当前页面缺少邮箱的话，需要进入学者主页或论文链接页面，从里面提取作者们的邮箱。
+4、保存到csv文件，然后将csv导入飞书多维表格。
 ```
 
-#### Option B: Python + Serper API (Free)
+## 输出格式
 
-Use `scripts/serper_search.py` template:
-
-```python
-from serper_search import serper_search
-
-results = await serper_search(
-    query='"reinforcement learning" PhD student site:*.edu',
-    api_key="YOUR_SERPER_API_KEY"
-)
-urls = [item["link"] for item in results.get("organic", [])]
-```
-
-**URL Filtering Priority** (see `references/url-priority-rules.md`):
-1. Personal pages (`*.github.io`, `sites.google.com`)
-2. University domains (see `references/top-ai-labs.md`)
-3. LinkedIn profiles (`linkedin.com/in/`)
-4. Google Scholar profiles
-
-### Step 3: Scrape Candidate Profiles
-
-#### Option A: BrightData MCP (Paid)
-
-Use `mcp__brightdata__scrape_as_markdown` for general pages:
-```
-Tool: mcp__brightdata__scrape_as_markdown
-Parameters:
-  url: "<candidate_url>"
-```
-
-For LinkedIn profiles, use the specialized tool:
-```
-Tool: mcp__brightdata__web_data_linkedin_person_profile
-Parameters:
-  url: "<linkedin_url>"
-```
-
-#### Option B: Python Scraping (Free)
-
-Use `scripts/httpx_scraper.py` or `scripts/lab_member_scraper.py`:
-
-```python
-# Simple static pages
-from httpx_scraper import batch_scrape
-
-results = await batch_scrape(urls, max_concurrent=5)
-
-# Lab member pages
-from lab_member_scraper import LabMemberScraper
-scraper = LabMemberScraper()
-members = scraper.scrape_lab("https://ai.stanford.edu/people/")
-```
-
-**Cloudflare Email Decryption** (see `scripts/cloudflare_email_decoder.py`):
-```python
-from cloudflare_email_decoder import decode_cloudflare_email
-email = decode_cloudflare_email("f493919e85c6c5...")
-```
-
-**Scrape in parallel**: Process 2-5 URLs simultaneously for efficiency.
-
-**Anti-scraping solutions**: See `references/anti-scraping-solutions.md` for handling:
-- Cloudflare protection
-- User-Agent detection
-- Rate limiting
-- IP blocking
-
-### Step 4: Extract Profile Data
-
-From scraped content, extract fields defined in `references/profile-schema.md`:
-
-**Required fields:**
-- `name`: English name
-- `name_cn`: Chinese name (if available)
-- `title`: Position
-- `affiliation`: University/Company
-- `email`: Contact email
-
-**Recommended fields:**
-- `advisor`: PhD advisor
-- `research_interests`: Research areas
-- `homepage`, `google_scholar`, `github`, `linkedin`
-- `education`, `experience`
-- `publications`, `citation_count`, `h_index`
-
-### Step 5: Identify Chinese Candidates (Optional)
-
-Use rules from `references/chinese-surnames.md`:
-
-**Multi-dimensional scoring:**
-- Surname match (40%): Check against 100+ Chinese surnames
-- Institution match (35%): Check against Chinese universities/labs
-- Name structure (15%): Pinyin pattern analysis
-- ID pattern (10%): OpenReview ID analysis
-
-**Decision threshold:** Confidence >= 0.5
-
-```python
-# Pseudo-code for Chinese detection
-is_chinese = (
-    surname_score * 0.4 +
-    institution_score * 0.35 +
-    structure_score * 0.15 +
-    id_score * 0.1
-) >= 0.5
-```
-
-### Step 6: Classify Candidate Type
-
-Use rules from `references/candidate-classifier.md`:
-
-**Priority order:** PhD > PostDoc > Professor > Industry > Master > Unknown
-
-**Classification keywords:**
-- **PhD**: "phd student", "doctoral student", "博士生"
-- **PostDoc**: "postdoc", "post-doctoral", "博士后"
-- **Professor**: "professor", "associate professor", "教授"
-- **Industry**: "engineer", "research scientist at [company]", "算法工程师"
-
-### Step 7: Deduplicate Candidates
-
-Use 7-level fingerprinting from `references/deduplication-rules.md`:
-
-**Priority (highest to lowest):**
-1. Email (most reliable)
-2. Google Scholar URL
-3. LinkedIn URL
-4. GitHub URL
-5. Personal website
-6. Composite hash (name + school + field)
-7. Source URL hash (last resort)
-
-```python
-# Standardization before comparison
-email = email.lower().strip()
-url = url.lower().replace("https://", "").replace("http://", "").replace("www.", "").rstrip("/")
-```
-
-### Step 8: Standardize Research Field
-
-Use `references/field-mappings.md` to map research directions to 22 standardized fields:
-
-**Standard fields:** RL, NLP, Multimodal, MOE, Pre-training, post-train, Alignment, Reasoning, Agent&RAG, MLSys, LLM4CODE, Computer Vision, Embodiment, Audio, EVAL, data, AI4S, Interpretable AI, Recommendation System, Federated Learning, Trustworthy AI, Pre/Post-train×RL
-
-```python
-def get_standardized_field(research_field: str) -> str:
-    for standard_field, aliases in FIELD_MAPPING.items():
-        for alias in aliases:
-            if alias.lower() in research_field.lower():
-                return standard_field
-    return "default"
-```
-
-### Step 9: Generate Personalized Email
-
-Use templates from `references/email-templates.md` and talk tracks from `references/talk-tracks.md`:
-
-**Template structure:**
-```
-Hi, {{researcher_name}},
-
-[Field-specific opening paragraph referencing their work]
-
-{{technical_hook}}  # Connect their specific work to our interests
-
-{{talk_track_paragraph}}  # 3-4 sentences showing domain depth
-
-[Closing with call to action]
-
-Signature
-```
-
-**Key placeholders to fill:**
-- `{{technical_hook}}`: Connect candidate's specific work to team interests
-- `{{talk_track_paragraph}}`: Domain expertise demonstration
-
-### Step 10: Present Results
-
-Format results as a structured table:
-
-```markdown
-## Candidate Profile: [Name]
-
-| Field | Value |
-|-------|-------|
-| Name | [English Name] ([Chinese Name]) |
-| Type | [PhD/PostDoc/Professor/Industry] |
-| Affiliation | [University/Lab] |
-| Research Field | [Standardized Field] |
-| Chinese | [Yes/No (confidence)] |
-| Email | [Email] |
-| Scholar | [URL] |
-| GitHub | [URL] |
-
-**Generated Email:**
-[Personalized email based on their field]
-```
-
----
-
-## Usage Examples
-
-### Example 1: Complete PhD Search with Email Generation
-
-**User Request:** "Search for RL PhD students at top universities and generate personalized emails"
-
-**Execution:**
-1. Generate queries for "reinforcement learning PhD student"
-2. Execute searches, collect URLs
-3. Scrape profiles in parallel
-4. Extract structured data
-5. Identify Chinese candidates (optional)
-6. Classify as PhD
-7. Deduplicate using email/Scholar URLs
-8. Standardize to "RL" field
-9. Generate emails using RL template and talk tracks
-10. Present results with emails
-
-### Example 2: Lab-Targeted Search (直接爬取实验室页面)
-
-**User Request:** "Find all PhD students at NJU LAMDA lab"
-
-**Execution (两阶段爬取):**
-1. Fetch lab people page: `https://www.lamda.nju.edu.cn/CH.PhD_student.ashx`
-2. Extract member entries from list page (filter by Chinese name length 2-5 chars)
-3. Exclude navigation noise (MainPage, Pub.ashx, etc. via URL keyword filter)
-4. For each member detail page (`/Name/`):
-   - Extract email with multi-method support: `mailto:` → Cloudflare XOR → `[at]` regex → plain regex
-   - Extract English name from URL path as fallback (e.g., `/zhangzn/` → `zhangzn`)
-   - Extract publications from "Publications" header + following `ul/ol`
-   - Handle SSL errors gracefully (skip `www.nju.edu.cn` etc.)
-5. Classify, deduplicate, present results
-6. See `scripts/lab_member_scraper.py` for complete implementation
-
-**Practical tips:**
-- Chinese lab websites often use `.ashx` (ASP.NET) pages
-- Email obfuscation: `[at]` / `(at)` is more common than Cloudflare on Chinese .edu.cn sites
-- SSL handshake failures are common on .edu.cn domains - catch and skip
-- Use `time.sleep(1.0)` for Chinese university websites (more conservative than global sites)
-
-### Example 3: Conference Paper Author Discovery (OpenReview API)
-
-**User Request:** "Find Chinese researchers who published at ICML 2025"
-
-**Execution (OpenReview API 方案 — 推荐):**
-1. Login to OpenReview API (`api2.openreview.net`)
-2. Fetch all papers: `client.get_all_notes(content={'venueid': 'ICML.cc/2025/Conference'})`
-3. For each paper, extract authors and author IDs
-4. Identify Chinese authors using surname matching (`references/chinese-surnames.md`)
-5. For Profile IDs (`~Name1`): call `client.get_profile()` to get Email, Homepage, Scholar, DBLP, ORCID, GitHub
-6. For Email IDs (`user@email.com`): use directly as contact email
-7. Apply three-level email fallback: `preferredEmail → emails[0] → 'Hidden'`
-8. Handle Google Scholar field name variants (`gscholar` or `google_scholar`)
-9. Construct ORCID URLs from bare IDs if needed
-10. Save to CSV with `utf-8-sig` encoding
-11. See `references/conference-paper-scraping.md` for complete guide and `scripts/openreview_scraper.py` for code
-
-**Performance benchmark (ICML 2025):**
-- 3,257 papers → 8,221 Chinese author records in ~12 min (4.73 it/s)
-- Homepage: 73%, Google Scholar: 72%
-
-**Execution (Web 搜索方案 — 备选):**
-1. Search: `ICML 2025 "alignment" authors site:openreview.net`
-2. Extract author names and affiliations from search results
-3. For each author, search for their personal page
-4. Scrape profiles and identify Chinese candidates
-5. Standardize research field, generate personalized emails
-
-### Example 4: GitHub Social Network Discovery
-
-**User Request:** "Find researchers in AmandaXu97's GitHub Following list"
-
-**Execution (GitHub API 三层数据拼装):**
-1. Get Following list via GitHub API: `GET /users/AmandaXu97/following?per_page=100` (paginated)
-2. For each user, assemble profile from three layers:
-   - Layer 1: `GET /users/{login}` → name, bio, email, company, blog, twitter_username
-   - Layer 2: `GET /users/{login}/social_accounts` → dedicated social links
-   - Layer 3: `raw.githubusercontent.com/{login}/{login}/main/README.md` → extract Scholar/LinkedIn/知乎 via regex
-3. Merge all text sources and extract links using regex patterns
-4. Classify candidates, deduplicate, present results
-5. See `scripts/github_network_scraper.py` for complete implementation
-
-**Performance benchmark (AmandaXu97):**
-- 926 following users processed successfully
-- Rate limit: 5,000 requests/hour with Token (vs 60/hour without)
-- Each user ≈ 3 API calls → ~2,778 total calls within limits
-
-**Key insight:** Profile README is a hidden goldmine — many researchers put Scholar, personal homepage, and social links there that aren't in the API profile.
-
-### Example 5: Hugo Academic Card Parsing with Cloudflare Decryption
-
-**User Request:** "Find all members of PKU.AI lab and extract their emails"
-
-**Execution (单页卡片提取 — Hugo Academic 模板):**
-1. Detect Hugo Academic template: look for `.people-person` or `.media.stream-item` CSS classes
-2. Fetch single page: `https://pku.ai/people/` (only 1 HTTP request needed)
-3. For each `.people-person` card:
-   - Extract name from `.portrait-title h2`
-   - Extract role/affiliation from `.portrait-title h3` and `.portrait-subtitle`
-   - Extract social links from `.network-icon a`
-4. For Cloudflare-protected emails in `.network-icon a`:
-   - Detect `/cdn-cgi/l/email-protection#` in href
-   - Extract hex string after `#`, XOR decrypt with first byte as key
-   - `continue` to skip further link classification
-5. For relative URLs (`/path`): prepend base URL (`https://pku.ai` + `/path`)
-6. Classify remaining links: GitHub, Scholar, LinkedIn, Zhihu, Bilibili
-7. See `scripts/lab_member_scraper.py` (`scrape_card_page()`) for implementation
-
-**Performance benchmark (PKU.AI):**
-- 65 members extracted from single page in <1 second
-- 30+ Cloudflare emails successfully decrypted (~95% success rate on encrypted emails)
-- Only 1 HTTP request (vs 66+ for two-phase approach)
-
-**Key insight:** Hugo Academic is the most popular academic website template. Recognizing `.people-person` + `.network-icon` CSS classes lets you extract all data from one page without visiting individual profile pages. Always check for Cloudflare email protection (`email-protection` in href) before converting relative URLs to absolute.
-
-### Example 6: Email Anchor Reverse Lookup (防御性爬虫策略)
-
-**User Request:** "Find all members of Tsinghua MediaLab (custom HTML, no fixed CSS classes)"
-
-**Execution (邮箱反向定位法 — 适用于自定义 HTML):**
-1. Recognize the challenge: page has no `.people-person` or other fixed CSS classes
-2. Use email anchor strategy: search for all text nodes containing `@`
-3. For each email node, traverse up the DOM tree (max 4 levels) to find the person card container
-4. Container recognition heuristics:
-   - Must be `div` or `li` tag
-   - Text length between 20-3000 characters (single person card range)
-   - Deduplicate: process each container only once
-5. Extract from container:
-   - Name: first line (filter out "All Faculty", "Team" etc.)
-   - Split Chinese/English: `re.findall(r'[\u4e00-\u9fa5]+')` for Chinese, `re.sub` to remove Chinese for English
-   - Email: regex match `[\w\.-]+@[\w\.-]+\.[a-zA-Z]{2,}`
-   - Title: lines containing "Professor", "PhD", "Master", "Student"
-   - Detail page link: relative or same-domain links (exclude `mailto:`)
-6. Optional: visit detail page for more info (bio, publications, social links)
-7. Filter out footer contact info (containing "Address", "Mailbox", "Contact")
-8. See `scripts/lab_member_scraper.py` (`scrape_by_email_anchor()`) for implementation
-
-**Performance benchmark (Tsinghua MediaLab):**
-- 39 members extracted from 39 email nodes
-- 100% extraction success rate (all email nodes correctly mapped to person cards)
-- Handles mixed Chinese/English names: "Lu Fang 方路" → `cn_name="方路"`, `en_name="Lu Fang"`
-
-**Key insight:** Email anchor reverse lookup is a defensive scraping strategy for when all else fails. It doesn't rely on CSS classes or page structure — only on the universal presence of email addresses on academic websites. The DOM traversal heuristic (20-3000 char text length) effectively filters out empty tags and full-page containers.
-
-**When to use each method:**
-- Hugo Academic template detected, card has emails → `scrape_card_page()` (Example 5)
-- Hugo Academic template detected, card only has names → two-phase with individual page visit (Example 8)
-- Clear person link list exists → `scrape_lab()` (Example 2)
-- No fixed structure, but emails present → `scrape_by_email_anchor()` (Example 6)
-
-### Example 5: Hugo Academic Card Parsing with Cloudflare Decryption
-
-**User Request:** "Find all members of PKU.AI lab and extract their emails"
-
-**Execution (单页卡片提取 — Hugo Academic 模板):**
-1. Detect Hugo Academic template: look for `.people-person` or `.media.stream-item` CSS classes
-2. Fetch single page: `https://pku.ai/people/` (only 1 HTTP request needed)
-3. For each `.people-person` card:
-   - Extract name from `.portrait-title h2`
-   - Extract role/affiliation from `.portrait-title h3` and `.portrait-subtitle`
-   - Extract social links from `.network-icon a`
-4. For Cloudflare-protected emails in `.network-icon a`:
-   - Detect `/cdn-cgi/l/email-protection#` in href
-   - Extract hex string after `#`, XOR decrypt with first byte as key
-   - `continue` to skip further link classification
-5. For relative URLs (`/path`): prepend base URL (`https://pku.ai` + `/path`)
-6. Classify remaining links: GitHub, Scholar, LinkedIn, Zhihu, Bilibili
-7. See `scripts/lab_member_scraper.py` (`scrape_card_page()`) for implementation
-
-**Performance benchmark (PKU.AI):**
-- 65 members extracted from single page in <1 second
-- 30+ Cloudflare emails successfully decrypted (~95% success rate on encrypted emails)
-- Only 1 HTTP request (vs 66+ for two-phase approach)
-
-**Key insight:** Hugo Academic is the most popular academic website template. Recognizing `.people-person` + `.network-icon` CSS classes lets you extract all data from one page without visiting individual profile pages. Always check for Cloudflare email protection (`email-protection` in href) before converting relative URLs to absolute.
-
-### Example 7: CVF Paper Scraping with PDF Email Extraction
-
-**User Request:** "Scrape all CVPR 2025 papers and extract author emails from PDFs"
-
-**Execution (CVF HTML 爬虫 + PDF 邮箱提取):**
-1. Fetch CVF listing page: `https://openaccess.thecvf.com/CVPR2025?day=all`
-2. Parse HTML using sibling traversal: `dt.ptitle` → `find_next_sibling('dd')` for authors → next `dd` for PDF link
-3. For each paper PDF:
-   - Download to memory stream (`io.BytesIO`, no disk I/O)
-   - Extract first page text via PyMuPDF (`fitz`): `doc[0].get_text("text").replace('\n', ' ')`
-   - Apply dual email extraction strategy:
-     - Strategy 1: Standard regex `[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+`
-     - Strategy 2: Bracket notation parser for LaTeX-style `{user1@sub., user2}domain.edu`
-   - Infer institutions from email domains (`.edu` / `.ac`)
-4. Save to CSV with `utf-8-sig` encoding
-5. See `scripts/cvf_paper_scraper.py` for complete implementation
-
-**Performance benchmark (CVPR 2025):**
-- 2,871 papers processed in ~85 minutes (1.78 s/paper, bottleneck is PDF download)
-- MuPDF non-fatal warnings (Screen annotations) safely ignored
-- Bracket email parsing successfully handles `{bguler@ece., amitrc@ece.}ucr.edu` → 2 valid emails
-
-**Key insight:** CVF Open Access is distinct from OpenReview — no API, no Profile system. Author contact info must be extracted from PDF first pages. The bracket email pattern `{users}@?domain` is extremely common in CS papers (LaTeX authblk package). Always `replace('\n', ' ')` on PDF text before regex matching, as PDFs break lines at visual boundaries, not logical ones.
-
-**When to use CVF vs OpenReview:**
-- OpenReview (ICML/NeurIPS/ICLR): API returns structured Profile with Homepage, Scholar, GitHub links
-- CVF (CVPR/ICCV/WACV): No API, but PDF emails are often more accurate than OpenReview's `preferredEmail`
-- For maximum coverage: use both platforms and merge results
-
-**Environment pitfall:** `pip install fitz` installs a WRONG abandoned package. Always use `pip install PyMuPDF`. In Colab, must restart runtime after fixing.
-
-### Example 8: Hugo Academic Two-Phase Scraping (列表页 → 个人页)
-
-**User Request:** "Find all members of TongClass (清华-北大通用人工智能实验班) and extract their info"
-
-**Execution (两阶段 Hugo Academic — 列表页+个人页):**
-1. Fetch list page: `https://tongclass.ac.cn/people/`
-2. Parse list page: alternating `h2` (grade headers like "清华 23 级") and `a[href*="/author/"]` (member links)
-3. Deduplicate: filter `Avatar` text nodes and duplicate URLs
-4. For each member's individual profile page:
-   - Extract email: Cloudflare XOR decrypt (`/cdn-cgi/l/email-protection#...`)
-   - Extract social links: GitHub (exclude `wowchemy`), Scholar, LinkedIn, Zhihu, Bilibili
-   - Filter placeholder links: URL-encoded "无" (`%e6%97%a0`)
-   - Extract interests via regex: `Interests\s*\n([\s\S]*?)(?=Education|$)`
-   - Extract education via regex: `Education\s*\n([\s\S]*?)(?=©|$)`
-   - Detect university from `.edu` domain links
-5. Save to CSV with `utf-8-sig`
-6. See `scripts/lab_member_scraper.py` for base implementation patterns
-
-**Performance benchmark (TongClass):**
-- 154 members from 6 grades (清华/北大 21-23 级)
-- Email: 145/154 (94%), GitHub: 66/154 (43%), Interests: 144/154 (94%)
-- Total time: ~30 seconds (0.2s delay × 154 pages)
-
-**Key insight:** This pattern bridges Example 2 (LAMDA two-phase) and Example 5 (Hugo Academic card-mode). When a Hugo Academic site's list page only shows names (no emails), you must visit individual profile pages. The grade/cohort headers in `h2` tags provide valuable metadata for grouping. The `Interests\s*\n([\s\S]*?)(?=Education|$)` regex pattern works on ANY Hugo Academic profile page.
-
-**Debugging journey (valuable decision framework):**
-1. `requests + BS4` → emails empty (Cloudflare protection)
-2. `Selenium` → WebDriver errors on Windows
-3. `Chrome DevTools MCP` → works but too slow for 154 pages
-4. `BrightData MCP` → emails still encrypted in HTML
-5. **XOR decrypt** → breakthrough! Cloudflare only does client-side XOR, the cipher text is in the HTML
-
-**When to use two-phase vs card-mode Hugo Academic:**
-- Card page has `.network-icon` with emails → card-mode (Example 5)
-- Card page only has names/photos, details on individual pages → two-phase (Example 8)
-
----
-
-## Best Practices
-
-1. **Parallel Processing**: Execute independent searches and scrapes in parallel
-2. **Domain Prioritization**: Prioritize academic domains over general sites
-3. **Progressive Filtering**: Filter aggressively at each step to reduce processing
-4. **Error Resilience**: Continue processing if individual scrapes fail
-5. **Deduplication Early**: Apply deduplication after extraction, not just at the end
-6. **Email Quality**: Always customize `{{technical_hook}}` based on actual candidate work
-7. **Field Mapping**: Use standardized fields for consistent categorization
-8. **Rate Limiting**: Space out requests if encountering rate limits
-
----
-
-## Output Format
-
-### Summary Table
+### 候选人摘要表
 
 | Name | Type | Affiliation | Field | Chinese? | Email |
 |------|------|-------------|-------|----------|-------|
 | Wei Zhang | PhD | Tsinghua | RL | Yes (0.92) | wei@tsinghua.edu |
-| Li Chen | PostDoc | Stanford | Multimodal | Yes (0.87) | li.chen@stanford.edu |
 
-### Detailed Profile (for each candidate)
+### 单个候选人详细输出
 
 ```markdown
-## Wei Zhang (张伟)
+## Candidate: Wei Zhang (张伟)
 
-**Identity:** PhD Student at Tsinghua University
-**Field:** Reinforcement Learning (RL)
-**Chinese:** Yes - surname match + institution match (confidence: 0.92)
-
-**Contact:**
+- Type: PhD Student
+- Affiliation: Tsinghua University
+- Research Field: Reinforcement Learning
+- Chinese: Yes (0.92)
 - Email: wei.zhang@tsinghua.edu.cn
-- Homepage: weizhang.github.io
-- Scholar: [Google Scholar link]
-- GitHub: [GitHub link]
+- Homepage: ...
+- Scholar: ...
+- GitHub: ...
 
-**Research:** RLHF, reward modeling, policy optimization
+### Research Summary
+- RLHF
+- Reward modeling
+- Policy optimization
 
-**Publications:**
-1. "Efficient RLHF for LLMs" (NeurIPS 2024)
-2. "Reward Hacking in Practice" (ICML 2024)
+### Publications
+1. ...
+2. ...
 
-**Generated Email:**
-[Personalized email using RL template]
+### Outreach Email
+...
 ```
+
+### 飞书工作流输出
+
+至少返回：
+- 飞书多维表格链接
+- 总记录数 / 成功数 / 失败数
+- 邮箱提取统计（如有）
+- 失败原因摘要
+
+## References guide
+
+按场景加载：
+
+- 通用搜索：`references/search-templates.md`
+- 候选人字段：`references/profile-schema.md`
+- 分类：`references/candidate-classifier.md`
+- 华人识别：`references/chinese-surnames.md`
+- 去重：`references/deduplication-rules.md`
+- 邮件模板：`references/email-templates.md`
+- talk tracks：`references/talk-tracks.md`
+- Python 抓取：`references/python-scraping-guide.md`
+- 反爬处理：`references/anti-scraping-solutions.md`
+- 会议抓取：`references/conference-paper-scraping.md`
+- 后续实践复盘：`references/practice-cases.md`
+- 后续最佳提示词：`references/prompt-best-practices.md`
+- 后续用户反馈：`references/user-feedback-notes.md`
+
+## Scripts guide
+
+- `scripts/openreview_scraper.py`：OpenReview 会议论文与作者抓取
+- `scripts/cvf_paper_scraper.py`：CVF 论文页面 + PDF 邮箱提取
+- `scripts/lab_member_scraper.py`：实验室成员抓取（两阶段 / Hugo Academic / 邮箱反向定位）
+- `scripts/github_network_scraper.py`：GitHub 研究者网络抽取
+- `scripts/cloudflare_email_decoder.py`：Cloudflare XOR 邮箱解密
+- `scripts/httpx_scraper.py`：通用异步 HTTP 抓取
+- `scripts/serper_search.py`：搜索入口模板
+
+## 不要遗漏的经验
+
+1. OpenReview 优先 API，不要一上来就网页搜索
+2. CVF 邮箱提取优先 PDF 首页文本
+3. Hugo Academic 要先判断是 card 模式还是两阶段模式
+4. 中国高校站点要考虑 `[at]` 混淆和 SSL 问题
+5. 页面结构混乱时，优先尝试邮箱反向定位法
+6. GitHub README 往往能补齐 Scholar / Homepage / LinkedIn
+7. 若用户要求飞书结果，必须考虑表字段创建与批量更新
+
+## 后续迭代入口
+
+后续收到新的实践文档后：
+1. 把高价值提示词加入 `references/prompt-best-practices.md`
+2. 在本 `SKILL.md` 的“最佳实践提示词”部分补充该功能已支持的明确说明
+3. 将踩坑与修复沉淀到 `references/user-feedback-notes.md`
+4. 必要时补充 `evals/evals.json` 做后续测试
