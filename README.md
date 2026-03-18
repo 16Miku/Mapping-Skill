@@ -21,7 +21,7 @@
 
 ## 什么时候应该触发它
 
-如果用户表达了以下意图，即使没有明确说“用 ai-talent-recruiter”，也应该考虑触发本 skill：
+如果用户表达了以下意图，即使没有明确说“用 Mapping-Skill”，也应该考虑触发本 skill：
 
 - “帮我找做 RL / LLM / 多模态 / Agent 的 PhD”
 - “把某实验室成员都扒下来，最好带邮箱和主页”
@@ -61,7 +61,7 @@
 将本目录复制到 Claude Skills 目录：
 
 ```bash
-cp -r ai-talent-search ~/.claude/skills/
+cp -r Mapping-Skill ~/.claude/skills/
 ```
 
 ### 依赖配置
@@ -82,7 +82,7 @@ pip install requests beautifulsoup4 httpx python-dotenv openreview-py pandas ope
 
 ### 验证方式
 
-安装完成后，在 Claude Code 中出现 `ai-talent-recruiter` 即表示可被触发。
+安装完成后，在 Claude Code 中出现 `Mapping-Skill` 即表示可被触发。
 
 ## OpenClaw 使用说明
 
@@ -284,7 +284,7 @@ OpenClaw 中 skill 可以作为斜杠命令暴露。用户可：
 
 ```text
 请执行 OpenReview 论文爬取任务：
-1. 使用 skills/Mapping-Skill/scripts/openreview_scraper.py 脚本
+1. 使用 Mapping-Skill skill 根目录下的 `scripts/openreview_scraper.py` 脚本
 2. 初始化爬虫时使用 api2.openreview.net 端点：
    scraper = OpenReviewScraper(
        username='XXXXXXX',
@@ -293,7 +293,7 @@ OpenClaw 中 skill 可以作为斜杠命令暴露。用户可：
    )
 3. 爬取 ICLR2025 的 5 篇论文（测试）+ https://openreview.net/group?id=ICLR.cc/2025/Conference#tab-accept-oral（记着替换链接）
 4. 保存 CSV 到 /tmp/ 目录
-5. 创建新的飞书多维表格，按照 Mapping-Skill/scripts/openreview_scraper.py 脚本中爬取的数据来创建相应字段
+5. 创建新的飞书多维表格，按照 Mapping-Skill skill 根目录下的 `scripts/openreview_scraper.py` 脚本中爬取的数据来创建相应字段
 6. 批量导入数据到多维表格
 7. 返回多维表格链接和统计信息
 ```
@@ -302,11 +302,11 @@ OpenClaw 中 skill 可以作为斜杠命令暴露。用户可：
 
 ```text
 请执行 CVF 论文爬取任务：
-1. 使用 skills/Mapping-Skill/scripts/cvf_paper_scraper.py 脚本
+1. 使用 Mapping-Skill skill 根目录下的 `scripts/cvf_paper_scraper.py` 脚本
 2. 严格按照脚本中的 extract_emails_from_text() 函数提取邮箱
 3. 爬取 ICCV2025 的 5 篇论文（测试）+ https://openaccess.thecvf.com/ICCV2025?day=all（记着替换链接）
 4. 保存 CSV 到 /tmp/ 目录
-5. 创建新的飞书多维表格，按照 Mapping-Skill/scripts/cvf_paper_scraper.py 脚本中爬取的数据来创建相应字段
+5. 创建新的飞书多维表格，按照 Mapping-Skill skill 根目录下的 `scripts/cvf_paper_scraper.py` 脚本中爬取的数据来创建相应字段
 6. 批量导入数据到多维表格
 7. 返回多维表格链接和邮箱提取统计
 ```
@@ -327,13 +327,13 @@ OpenClaw 中 skill 可以作为斜杠命令暴露。用户可：
 3. 只提取必要字段：记录ID、论文标题、作者、邮箱、机构
 4. 过滤条件：只处理有邮箱的记录
 【第三步：确定研究领域】
-1. 读取 skills/Mapping-Skill/references/field-mappings.md
+1. 读取 Mapping-Skill skill 根目录下的 `references/field-mappings.md`
 2. 根据论文标题和关键词，使用映射规则确定研究领域
 3. 示例：
    - "Symmetry Understanding of 3D Shapes" → Computer Vision
    - "Efficient Adaptation of Vision Transformer" → NLP
 【第四步：生成个性化邮件】
-1. 读取 skills/Mapping-Skill/references/email-templates.md
+1. 读取 Mapping-Skill skill 根目录下的 `references/email-templates.md`
 2. 根据研究领域选择对应模板（共22个领域）
 3. 填充占位符：
    - {{researcher_name}} → 第一作者姓名
@@ -405,7 +405,7 @@ OpenClaw 中 skill 可以作为斜杠命令暴露。用户可：
 ## 目录结构
 
 ```text
-ai-talent-search/
+Mapping-Skill/
 ├── SKILL.md
 ├── README.md
 ├── references/

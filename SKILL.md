@@ -1,9 +1,9 @@
 ---
-name: ai-talent-recruiter
-description: AI/ML 人才搜索、论文作者发现、实验室成员爬取、GitHub 研究者挖掘与个性化招聘邮件生成 skill。只要用户提到查找 AI/ML PhD、研究员、工程师，抓取实验室成员、OpenReview/CVF 会议作者、GitHub 网络研究者，提取主页/Scholar/GitHub/邮箱/研究方向，识别华人、分类去重，或把结果导入飞书多维表格并批量生成邮件，就应该优先使用这个 skill；即使用户没有明确说“使用 Mapping-Skill / ai-talent-recruiter”，只要任务属于这些复合工作流，也应触发。
+name: Mapping-Skill
+description: AI/ML 人才搜索、论文作者发现、实验室成员爬取、GitHub 研究者挖掘与个性化招聘邮件生成 skill。只要用户提到查找 AI/ML PhD、研究员、工程师，抓取实验室成员、OpenReview/CVF 会议作者、GitHub 网络研究者，提取主页/Scholar/GitHub/邮箱/研究方向，识别华人、分类去重，或把结果导入飞书多维表格并批量生成邮件，就应该优先使用这个 skill；即使用户没有明确说“使用 Mapping-Skill”，只要任务属于这些复合工作流，也应触发。
 ---
 
-# AI Talent Recruiter
+# Mapping-Skill
 
 面向 Claude Code 与 OpenClaw 的 AI/ML 人才搜索与触达执行手册。
 
@@ -176,7 +176,7 @@ OpenClaw 常见技能加载位置：
 
 ```text
 请执行 OpenReview 论文爬取任务：
-1. 使用 skills/Mapping-Skill/scripts/openreview_scraper.py 脚本
+1. 使用 `scripts/openreview_scraper.py` 脚本
 2. 初始化爬虫时使用 api2.openreview.net 端点：
    scraper = OpenReviewScraper(
        username='XXXXXXX',
@@ -185,7 +185,7 @@ OpenClaw 常见技能加载位置：
    )
 3. 爬取 ICLR2025 的 5 篇论文（测试）+ https://openreview.net/group?id=ICLR.cc/2025/Conference#tab-accept-oral（记着替换链接）
 4. 保存 CSV 到 /tmp/ 目录
-5. 创建新的飞书多维表格，按照 Mapping-Skill/scripts/openreview_scraper.py 脚本中爬取的数据来创建相应字段
+5. 创建新的飞书多维表格，按照 `scripts/openreview_scraper.py` 脚本中爬取的数据来创建相应字段
 6. 批量导入数据到多维表格
 7. 返回多维表格链接和统计信息
 ```
@@ -194,11 +194,11 @@ OpenClaw 常见技能加载位置：
 
 ```text
 请执行 CVF 论文爬取任务：
-1. 使用 skills/Mapping-Skill/scripts/cvf_paper_scraper.py 脚本
+1. 使用 `scripts/cvf_paper_scraper.py` 脚本
 2. 严格按照脚本中的 extract_emails_from_text() 函数提取邮箱
 3. 爬取 ICCV2025 的 5 篇论文（测试）+ https://openaccess.thecvf.com/ICCV2025?day=all（记着替换链接）
 4. 保存 CSV 到 /tmp/ 目录
-5. 创建新的飞书多维表格，按照 Mapping-Skill/scripts/cvf_paper_scraper.py 脚本中爬取的数据来创建相应字段
+5. 创建新的飞书多维表格，按照 `scripts/cvf_paper_scraper.py` 脚本中爬取的数据来创建相应字段
 6. 批量导入数据到多维表格
 7. 返回多维表格链接和邮箱提取统计
 ```
@@ -219,13 +219,13 @@ OpenClaw 常见技能加载位置：
 3. 只提取必要字段：记录ID、论文标题、作者、邮箱、机构
 4. 过滤条件：只处理有邮箱的记录
 【第三步：确定研究领域】
-1. 读取 skills/Mapping-Skill/references/field-mappings.md
+1. 读取 `references/field-mappings.md`
 2. 根据论文标题和关键词，使用映射规则确定研究领域
 3. 示例：
    - "Symmetry Understanding of 3D Shapes" → Computer Vision
    - "Efficient Adaptation of Vision Transformer" → NLP
 【第四步：生成个性化邮件】
-1. 读取 skills/Mapping-Skill/references/email-templates.md
+1. 读取 `references/email-templates.md`
 2. 根据研究领域选择对应模板（共22个领域）
 3. 填充占位符：
    - {{researcher_name}} → 第一作者姓名
